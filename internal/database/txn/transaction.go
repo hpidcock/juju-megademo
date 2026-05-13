@@ -220,25 +220,7 @@ func (t *RetryingTxnRunner) txnWithHooks(
 	db *sqlair.DB,
 	fn func(context.Context, *sqlair.TX) error,
 ) error {
-	// Attempt a read-only transaction first. If the caller writes,
-	// SQLite returns SQLITE_READONLY and we upgrade to a write
-	// transaction with hooks.
-	tx, err := db.Begin(ctx, &sqlair.TXOptions{ReadOnly: true})
-	if err != nil {
-		if strings.Contains(err.Error(), txnInTxn) {
-			_, _ = db.PlainDB().Exec("ROLLBACK")
-			return ErrTxnInTxn
-		}
-		return errors.Trace(err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		t.rollback(ctx, tx)
-		if !isReadOnlyError(err) {
-			return errors.Trace(err)
-		}
-		return t.txnWriteWithHooks(ctx, db, fn)
-	}
-	return errors.Trace(t.commit(ctx, tx))
+	return t.txnWriteWithHooks(ctx, db, fn)
 }
 
 func (t *RetryingTxnRunner) txnWriteWithHooks(
@@ -315,25 +297,7 @@ func (t *RetryingTxnRunner) stdTxnWithHooks(
 	db *sql.DB,
 	fn func(context.Context, *sql.Tx) error,
 ) error {
-	// Attempt a read-only transaction first. If the caller writes,
-	// SQLite returns SQLITE_READONLY and we upgrade to a write
-	// transaction with hooks.
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		if strings.Contains(err.Error(), txnInTxn) {
-			_, _ = db.Exec("ROLLBACK")
-			return ErrTxnInTxn
-		}
-		return errors.Trace(err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		t.rollback(ctx, tx)
-		if !isReadOnlyError(err) {
-			return errors.Trace(err)
-		}
-		return t.stdTxnWriteWithHooks(ctx, db, fn)
-	}
-	return errors.Trace(t.commit(ctx, tx))
+	return t.stdTxnWriteWithHooks(ctx, db, fn)
 }
 
 func (t *RetryingTxnRunner) stdTxnWriteWithHooks(

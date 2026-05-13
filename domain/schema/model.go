@@ -109,6 +109,7 @@ const (
 	tableRelationNetworkIngress
 	tableRelationNetworkEgress
 	tableModelMigrating
+	tableModelDebugChangeStream
 )
 
 // modelPostPatchFilesByVersion is used to categorise the post patch files
@@ -193,6 +194,7 @@ func ModelDDLForVersion(version semversion.Number) *schema.Schema {
 		triggers.ChangeLogTriggersForRelationNetworkIngress("relation_uuid", tableRelationNetworkIngress),
 		triggers.ChangeLogTriggersForRelationNetworkEgress("relation_uuid", tableRelationNetworkEgress),
 		triggers.ChangeLogTriggersForModelMigrating("model_uuid", tableModelMigrating),
+		triggers.ChangeLogTriggersForDebugChangeStream("id", tableModelDebugChangeStream),
 	)
 
 	// Generic triggers.

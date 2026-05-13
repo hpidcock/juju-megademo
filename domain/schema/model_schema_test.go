@@ -833,6 +833,8 @@ func (s *modelSchemaSuite) TestModelTriggers(c *tc.C) {
 		"trg_log_custom_relation_life_suspended_delete",
 
 		"trg_model_migrating_immutable_update",
+
+		"trg_log_debug_change_stream_update",
 	)
 
 	got := readEntityNames(c, s.DB(), "trigger")

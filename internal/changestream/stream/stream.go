@@ -40,6 +40,10 @@ const (
 	stateIdle     = "idle"
 	stateBegin    = "begin"
 	stateDispatch = "dispatch"
+
+	// debugChangeStreamNamespace is the change-log namespace that
+	// signals the stream worker to enter debug mode.
+	debugChangeStreamNamespace = "debug_change_stream"
 )
 
 var (
@@ -382,6 +386,38 @@ OUTER:
 
 				if traceEnabled {
 					s.logger.Tracef(ctx, "no changes with attempt %d", attempt)
+				}
+
+				select {
+				case <-s.tomb.Dying():
+					return tomb.ErrDying
+				case <-s.clock.After(backOffStrategy(0, attempt)):
+					if err := s.reportIdleState(ctx, attempt); err != nil {
+						return errors.Trace(err)
+					}
+					continue OUTER
+				}
+			}
+
+			// A change on debug_change_stream is a hint to enter debug
+			// mode. The actual state is always read via readDebugState
+			// on the next iteration. These changes must not be forwarded
+			// to consumers; filter them out here.
+			var filtered []changeEvent
+			for _, ch := range changes {
+				if ch.namespace == debugChangeStreamNamespace {
+					s.debugMode = true
+					continue
+				}
+				filtered = append(filtered, ch)
+			}
+			changes = filtered
+
+			if len(changes) == 0 {
+				attempt++
+
+				if traceEnabled {
+					s.logger.Tracef(ctx, "no changes (after debug filter) with attempt %d", attempt)
 				}
 
 				select {

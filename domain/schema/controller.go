@@ -46,6 +46,7 @@ const (
 	tableModelAuthorizedKeys
 	tableUserAuthentication
 	tableObjectStoreBackend
+	tableControllerDebugChangeStream
 )
 
 // controllerPostPatchFilesByVersion is used to categorise the post patch files
@@ -100,6 +101,7 @@ func ControllerDDLForVersion(version semversion.Number) *schema.Schema {
 		triggers.ChangeLogTriggersForModelAuthorizedKeys("model_uuid", tableModelAuthorizedKeys),
 		triggers.ChangeLogTriggersForUserAuthentication("user_uuid", tableUserAuthentication),
 		triggers.ChangeLogTriggersForObjectStoreBackend("uuid", tableObjectStoreBackend),
+		triggers.ChangeLogTriggersForDebugChangeStream("id", tableControllerDebugChangeStream),
 	)
 
 	// Generic triggers.
