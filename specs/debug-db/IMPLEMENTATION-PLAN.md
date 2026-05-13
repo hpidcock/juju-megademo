@@ -10,7 +10,7 @@ Tasks are ordered to produce a **runnable demo as early as possible**.
 | 1 — TUI model with hardcoded mock data | ✅ Complete | `d4e6d19` |
 | 2 — `dbDebugCommand` + registration | ✅ Complete | `06dd39c` (initial), `6aeead5` (test fixes) |
 | 3 — TUI model tests | ✅ Complete | Pending commit |
-| 4 — Client package `api/common/dqlite.go` | ✅ Complete | `b60c6d1` (initial), `PENDING` (review fixes) |
+| 4 — Client package `api/common/dqlite.go` | ✅ Complete | `b60c6d1` (initial), `1b09706` (review fixes) |
 | 5 — Backend handler `apiserver/dqlite.go` | ⬜ Not started | — |
 | 6 — Wire real client | ⬜ Not started | — |
 | 7 — Memory files | ⬜ Not started | — |
