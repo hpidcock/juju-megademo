@@ -373,6 +373,9 @@ func registerCommands(r commandRegistry) {
 	r.Register(application.NewResolvedCommand())
 	r.Register(newDebugLogCommand(nil))
 	r.Register(debug.NewDebugCommand())
+	r.Register(newDebugPauseCommand(nil))
+	r.Register(newDebugStepCommand(nil))
+	r.Register(newDebugResumeCommand(nil))
 	r.Register(ssh.NewDebugHooksCommand(nil, ssh.DefaultSSHRetryStrategy, ssh.DefaultSSHPublicKeyRetryStrategy))
 	r.Register(ssh.NewDebugCodeCommand(nil, ssh.DefaultSSHRetryStrategy, ssh.DefaultSSHPublicKeyRetryStrategy))
 
