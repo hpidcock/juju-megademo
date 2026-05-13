@@ -14,6 +14,19 @@ type selectTxnMsg struct {
 	txnIndex int
 }
 
+type switchModelMsg struct {
+	modelUUID string
+	modelName string
+}
+
+type listModelsMsg struct {
+	models []ModelInfo
+	err    error
+	open   bool
+}
+
+type statusTickMsg time.Time
+
 type changestreamTickMsg time.Time
 
 type logMsg struct {

@@ -44,19 +44,20 @@ func (m helpModel) View() string {
 		key  string
 		desc string
 	}{
-		{"s", "Step forward 1 transaction"},
+		{"s", "Step forward 1 transaction (current model)"},
 		{"S", "Step forward N transactions"},
-		{"p", "Pause the changestream"},
-		{"r", "Resume the changestream"},
-		{"m", "Switch model"},
+		{"p", "Pause the current model's changestream"},
+		{"P", "Pause all models' changestreams"},
+		{"r", "Resume the current model's changestream"},
+		{"m", "Switch model (opens model picker)"},
 		{"Tab", "Switch to next pane"},
 		{"Shift+Tab", "Switch to previous pane"},
-		{"↑ / ↓", "Navigate active pane"},
-		{"Enter", "Select transaction for Trace Pane"},
+		{"↑ / ↓", "Navigate active pane / model picker"},
+		{"Enter", "Select transaction or model"},
 		{"l", "Cycle log level"},
 		{"/", "Filter by module"},
-		{"Esc", "Cancel/clear filter input"},
-		{"q", "Quit the TUI"},
+		{"Esc", "Cancel picker or filter input"},
+		{"q", "Quit (resumes all paused models)"},
 		{"?", "Toggle this help overlay"},
 	}
 

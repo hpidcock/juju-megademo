@@ -4,6 +4,8 @@
 package debug
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -23,25 +25,40 @@ type debugModel struct {
 	activePane     pane
 	controllerName string
 	modelName      string
+	modelUUID      string
 
 	changestream changestreamModel
 	log          logModel
 	trace        traceModel
 	help         helpModel
 
+	debugAPI        DebugChangeStreamAPI
+	modelLister     ModelListAPI
+	switchModelFunc func(modelName string) error
+
 	showHelp bool
 	quitting bool
 }
 
-func newDebugModel(controllerName, modelName string, logAPI LogAPI) debugModel {
+func newDebugModel(
+	controllerName, modelName, modelUUID string,
+	logAPI LogAPI,
+	debugAPI DebugChangeStreamAPI,
+	modelLister ModelListAPI,
+	switchModelFunc func(modelName string) error,
+) debugModel {
 	return debugModel{
-		controllerName: controllerName,
-		modelName:      modelName,
-		activePane:     changestreamPane,
-		changestream:   newChangestreamModel(),
-		log:            newLogModel(logAPI),
-		trace:          newTraceModel(),
-		help:           newHelpModel(),
+		controllerName:  controllerName,
+		modelName:       modelName,
+		modelUUID:       modelUUID,
+		activePane:      changestreamPane,
+		changestream:    newChangestreamModel(debugAPI, modelLister, modelName, modelUUID),
+		log:             newLogModel(logAPI),
+		trace:           newTraceModel(),
+		help:            newHelpModel(),
+		debugAPI:        debugAPI,
+		modelLister:     modelLister,
+		switchModelFunc: switchModelFunc,
 	}
 }
 
@@ -56,6 +73,12 @@ func (m debugModel) Init() tea.Cmd {
 func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.changestream.pickerOpen {
+			var cmd tea.Cmd
+			m.changestream, cmd = m.changestream.Update(msg)
+			return m, cmd
+		}
+
 		if m.log.filtering {
 			switch msg.String() {
 			case "esc":
@@ -75,6 +98,7 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "q":
+			m.resumeAllPaused()
 			if m.log.streamCancel != nil {
 				m.log.streamCancel()
 			}
@@ -141,12 +165,46 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	if selectMsg, ok := msg.(selectTxnMsg); ok {
-		if selectMsg.txnIndex >= 0 && selectMsg.txnIndex < len(m.changestream.transactions) {
-			m.trace.setTransaction(m.changestream.transactions[selectMsg.txnIndex])
+		ms := m.changestream.currentModelState()
+		if ms != nil && selectMsg.txnIndex >= 0 && selectMsg.txnIndex < len(ms.Transactions) {
+			m.trace.setTransaction(ms.Transactions[selectMsg.txnIndex])
 		}
 	}
 
+	if switchMsg, ok := msg.(switchModelMsg); ok {
+		m.modelName = switchMsg.modelName
+		m.modelUUID = switchMsg.modelUUID
+		m.changestream.currentModel = switchMsg.modelUUID
+		m.changestream.cursor = 0
+		m.trace = newTraceModel()
+		if m.switchModelFunc != nil {
+			_ = m.switchModelFunc(switchMsg.modelName)
+		}
+		cmds = append(cmds, m.restartLogStream()...)
+	}
+
 	return m, tea.Batch(cmds...)
+}
+
+func (m *debugModel) resumeAllPaused() {
+	if m.debugAPI == nil {
+		return
+	}
+	ctx := context.Background()
+	for _, uuid := range m.changestream.pausedModelUUIDs() {
+		_ = m.debugAPI.Resume(ctx, uuid)
+	}
+}
+
+func (m *debugModel) restartLogStream() []tea.Cmd {
+	if m.log.streamCancel != nil {
+		m.log.streamCancel()
+	}
+	m.log.streamVersion++
+	m.log.records = nil
+	m.log.disconnected = false
+	m.log.streamErr = ""
+	return []tea.Cmd{startLogStreamCmd(m.log.logAPI, m.log.levelIndex, m.log.streamVersion)}
 }
 
 func (m *debugModel) syncActiveState() {
@@ -169,7 +227,17 @@ func (m debugModel) View() string {
 	logView := m.log.View()
 	traceView := m.trace.View()
 
-	return contextBar + "\n" + changestreamView + "\n" + logView + "\n" + traceView
+	view := contextBar + "\n" + changestreamView + "\n" + logView + "\n" + traceView
+
+	if m.changestream.pickerOpen {
+		pickerOverlay := m.changestream.viewPicker()
+		view = lipgloss.Place(m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			pickerOverlay,
+		)
+	}
+
+	return view
 }
 
 func (m debugModel) viewContextBar() string {

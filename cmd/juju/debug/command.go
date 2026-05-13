@@ -22,6 +22,10 @@ Juju changestream. The TUI presents three panes - changestream status
 and controls, log tail, and trace inspection - and allows a developer
 to pause, step through, and resume the changestream interactively.
 
+Press m inside the TUI to switch between models. Press P to pause all
+models, r to resume the current model, or q to quit (which resumes all
+paused models).
+
 This command requires a controller connection and controller superuser
 access.
 `
@@ -73,7 +77,36 @@ func (c *debugCommand) Run(ctx *cmd.Context) error {
 	}
 
 	logAPI := newLogAPIClient(apiRoot)
-	model := newDebugModel(controllerName, modelName, logAPI)
+
+	var modelUUID string
+	if modelName != "" {
+		uuids, err := c.ModelUUIDs(ctx, []string{modelName})
+		if err == nil && len(uuids) > 0 {
+			modelUUID = uuids[0]
+		}
+	}
+
+	accountDetails, err := c.CurrentAccountDetails()
+	if err != nil {
+		return fmt.Errorf("getting account details: %w", err)
+	}
+
+	modelManagerClient, err := c.NewModelManagerAPIClient(ctx)
+	if err != nil {
+		return fmt.Errorf("creating model manager client: %w", err)
+	}
+
+	debugAPI := newMockDebugChangeStreamAPI()
+	modelLister := newModelListAPIClient(modelManagerClient, accountDetails.User)
+	defer modelManagerClient.Close()
+	defer debugAPI.Close()
+
+	qualifyingStore := modelcmd.QualifyingClientStore{ClientStore: store}
+	switchModel := func(modelName string) error {
+		return qualifyingStore.SetCurrentModel(controllerName, modelName)
+	}
+
+	model := newDebugModel(controllerName, modelName, modelUUID, logAPI, debugAPI, modelLister, switchModel)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI exited with error: %w", err)

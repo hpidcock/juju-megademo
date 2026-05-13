@@ -14,13 +14,35 @@
 //
 // Key routing: the top-level Update dispatches key events to the relevant
 // sub-model. Changestream actions (p, P, s, S, r) go to changestreamModel.
-// Log actions (l, /) go to logModel. The m key triggers model switching
-// (phase 3). The ? key toggles the help overlay.
+// Log actions (l, /) go to logModel. The m key opens the model-picker
+// overlay. The ? key toggles the help overlay.
 //
 // Sub-models communicate through message types defined in messages.go. When
 // the user selects a transaction in the changestream pane (Enter key),
 // changestreamModel emits a selectTxnMsg. The top-level Update handles this
 // message by calling traceModel.setTransaction to update the trace pane.
+//
+// When the user switches models (m key, then Enter in the picker),
+// changestreamModel emits a switchModelMsg. The top-level Update handles
+// this by updating the context bar, restarting the log stream for the new
+// model, and resetting the trace pane.
+//
+// # Multi-model support
+//
+// The TUI tracks per-model state in a map keyed by model UUID. Each model
+// has its own pause/resume state, transaction list, and cursor position.
+// The currently displayed model is identified by currentModel (a UUID).
+//
+// The m key opens a model-picker overlay that lists all models on the
+// controller. The user navigates with ↑/↓ and selects with Enter. The
+// picker is rendered as an overlay on top of the normal TUI layout.
+//
+// Pause/resume semantics:
+//   - p pauses only the current model
+//   - P pauses all models
+//   - r resumes only the current model
+//   - s steps only the current model
+//   - On quit, all paused models are automatically resumed
 //
 // # Log streaming
 //
@@ -35,13 +57,19 @@
 // the updated level. Module filtering (/ key) is client-side substring
 // matching on the Module field and does not restart the stream.
 //
+// When the model is switched, the log stream is restarted for the new model.
+//
 // # Changestream refresh cycle
 //
 // The changestreamModel drives a periodic tick (changestreamTickMsg) every
-// 500ms. On each tick, if the changestream is not paused, the model replaces
-// its transaction list with a fresh set (capped at 10 entries). This ensures
-// the TUI stays up-to-date with the stream of new transactions. When paused,
-// ticks are ignored and the transaction list is frozen.
+// 500ms. On each tick, if the current model's changestream is not paused,
+// the model replaces its transaction list with a fresh set (capped at 10
+// entries). This ensures the TUI stays up-to-date with the stream of new
+// transactions. When paused, ticks are ignored and the transaction list is
+// frozen.
+//
+// A separate statusTickMsg polls the DebugChangeStreamAPI.Status method to
+// refresh the state of all models.
 //
 // # Phased implementation
 //
@@ -50,10 +78,9 @@
 //
 //   - changestream transactions  -> phase-04 (DebugChangeStream facade)
 //   - pause/resume/step actions  -> phase-04 (DebugChangeStream facade)
-//   - pause-all (P key)          -> phase-03 (multi-model support)
 //   - step-N (S key)             -> phase-04 (DebugChangeStream.Step)
 //   - trace spans                -> phase-02 (Grafana Tempo)
-//   - model switching (m key)    -> phase-03 (model list + switch)
+//   - status polling             -> phase-04 (DebugChangeStream facade)
 //
 // See specs/debug-tui/README.md for the full phase index and dependency graph.
 //
@@ -68,7 +95,7 @@
 //
 // # State machine
 //
-//	The changestream pane has two states:
+//	The changestream pane has two states per model:
 //
 //	 +----------+   p   +--------+
 //	 | running  | ----> | paused |

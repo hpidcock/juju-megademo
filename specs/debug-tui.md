@@ -45,14 +45,9 @@ The command embeds `modelcmd.ControllerCommandBase` (not
 
 ### Flags
 
-| Flag | Type | Default | Meaning |
-|------|------|---------|---------|
-| `--model`, `-m` | string | current model | Target model's changestream. Ignored when `--all` is set. |
-| `--all` | bool | false | Show all model changestreams + controller changestream. |
-| `--controller` | bool | false | Show only the controller changestream. |
-
-When no scope flags are given, the current model is targeted (same semantics
-as `debug-pause`/`debug-step`/`debug-resume`).
+The command takes **no scope flags**. Model selection is handled
+entirely within the TUI via the `m` key, which opens a model-picker
+overlay. The TUI starts by targeting the current model.
 
 ### Access control
 
@@ -96,9 +91,11 @@ controller and model the TUI is operating on:
 - Left: controller name and model name (e.g. `Controller: mycontroller  Model: mymodel`).
 - Right: context-aware shortcuts (`[m]odel` to switch model, `[q]uit`).
 
-When the user presses `m`, a list of available models (including the
-controller model) is shown for selection. Switching models changes the
-changestream data displayed. Model switching is implemented in phase 3.
+When the user presses `m`, a model-picker overlay lists all models
+(including the controller model) for selection. Switching models updates
+the changestream data, the log stream, and the context bar. Each model
+retains its own pause/resume state. `P` pauses all models; `r` resumes
+the current model. On quit, all paused models are resumed.
 
 All changestream actions (`s`, `S`, `p`, `r`) target the model shown
 in the context bar.
@@ -158,23 +155,23 @@ The trace view shows:
 
 | Key | Context | Action |
 |-----|---------|--------|
-| `s` | Changestream | Step forward 1 transaction (calls `debug-step` facade) |
+| `s` | Changestream | Step forward 1 transaction for the current model |
 | `S` | Changestream | Step forward N transactions (prompts for N) |
-| `p` | Changestream | Pause the changestream (calls `debug-pause` facade) |
-| `r` | Changestream | Resume the changestream (calls `debug-resume` facade) |
-| `m` | Global | Switch model (prompts for selection) |
-| `Shift+Tab` | Changestream (multi-model) | Switch to previous tab (phase 3) |
-| `↑` / `↓` | Transaction List | Navigate transaction list |
-| `Enter` | Transaction List | Select transaction for Trace Pane |
+| `p` | Changestream | Pause the current model's changestream |
+| `P` | Changestream | Pause all models' changestreams |
+| `r` | Changestream | Resume the current model's changestream |
+| `m` | Global | Open model-picker overlay to switch model |
+| `↑` / `↓` | Transaction List / Model Picker | Navigate list |
+| `Enter` | Transaction List / Model Picker | Select transaction for Trace Pane / switch model |
 | `l` | Log Pane | Cycle log level (TRACE → DEBUG → INFO → WARNING → ERROR) |
 | `/` | Log Pane | Filter by module (text input) |
-| `Esc` | Any filter input | Cancel/clear filter input |
-| `q` | Global | Quit the TUI |
+| `Esc` | Any overlay | Cancel/clear picker or filter input |
+| `q` | Global | Quit the TUI (resumes all paused models) |
 | `?` | Global | Show help overlay with all keybindings |
 
-All changestream actions (`s`, `S`, `p`, `r`) target the currently
-selected model/controller tab. When a single model is targeted (no `--all`),
-those keys target that model directly.
+All changestream actions (`s`, `S`, `p`, `P`, `r`) target the currently
+selected model shown in the context bar, except `P` which pauses all models.
+On quit, all paused models are automatically resumed.
 
 ## TUI Architecture
 
@@ -275,10 +272,16 @@ testability:
 
 ```go
 type DebugChangeStreamAPI interface {
-    Pause(ctx context.Context, scope DebugScope) error
-    Step(ctx context.Context, scope DebugScope, count int) ([]StepResult, error)
-    Resume(ctx context.Context, scope DebugScope) error
-    Status(ctx context.Context, scope DebugScope) ([]StreamStatus, error)
+    Status(ctx context.Context) ([]StreamStatus, error)
+    Pause(ctx context.Context, modelUUID string) error
+    Step(ctx context.Context, modelUUID string, count int) error
+    Resume(ctx context.Context, modelUUID string) error
+    Close() error
+}
+
+type ModelListAPI interface {
+    ListModels(ctx context.Context) ([]ModelInfo, error)
+    Close() error
 }
 
 type LogAPI interface {
@@ -289,21 +292,17 @@ type LogAPI interface {
 Concrete implementations call the Juju API server via the standard
 `base.APICaller`.
 
-## Multi-Model Layout
+## Multi-Model Support
 
-When `--all` is passed, the Changestream Pane shows a tab bar across the top:
+When the user presses `m`, a model-picker overlay lists all models
+available on the controller. The overlay shows each model's name and
+current changestream status (RUNNING / PAUSED / STEP). The user
+navigates with `↑`/`↓` and selects with `Enter`; `Esc` cancels.
 
-```
- [controller] [model:foo] [model:bar]*
-```
-
-The asterisk (`*`) marks the active tab. Each tab corresponds to one
-database's changestream. Switching tabs with `Tab`/`Shift+Tab` updates:
-- The transaction list
-- The target for `s`/`p`/`r` actions
-
-The `Status` facade call returns an array of `StreamStatus` (one per
-database), so a single call refreshes all tabs.
+Switching models updates the context bar, the changestream transaction
+list, and the log stream. Each model's pause/resume state is tracked
+independently. `P` pauses all models at once; `r` resumes only the
+current model.
 
 ## Graceful Shutdown
 
@@ -351,6 +350,6 @@ dependency graph, and execution order.
 | 0 | [phase-00-working-tui.md](debug-tui/phase-00-working-tui.md) | Working command with bubbletea, mock data |
 | 1 | [phase-01-debug-logs.md](debug-tui/phase-01-debug-logs.md) | Live log streaming from Logger facade |
 | 2 | [phase-02-grafana-tempo.md](debug-tui/phase-02-grafana-tempo.md) | Real spans from Grafana Tempo |
-| 3 | [phase-03-model-switching.md](debug-tui/phase-03-model-switching.md) | `--all` / `--controller` tab switching |
+| 3 | [phase-03-model-switching.md](debug-tui/phase-03-model-switching.md) | `m` model-picker overlay, per-model state |
 | 4 | [phase-04-database-access.md](debug-tui/phase-04-database-access.md) | Real transaction list via facade |
 | 5 | [phase-05-workers-popup.md](debug-tui/phase-05-workers-popup.md) | Worker popup window |
