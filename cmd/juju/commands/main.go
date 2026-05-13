@@ -29,6 +29,7 @@ import (
 	"github.com/juju/juju/cmd/juju/controller"
 	"github.com/juju/juju/cmd/juju/crossmodel"
 	"github.com/juju/juju/cmd/juju/dashboard"
+	"github.com/juju/juju/cmd/juju/debug"
 	"github.com/juju/juju/cmd/juju/firewall"
 	"github.com/juju/juju/cmd/juju/machine"
 	"github.com/juju/juju/cmd/juju/model"
@@ -371,6 +372,7 @@ func registerCommands(r commandRegistry) {
 	r.Register(ssh.NewSSHCommand(nil, nil, ssh.DefaultSSHRetryStrategy, ssh.DefaultSSHPublicKeyRetryStrategy))
 	r.Register(application.NewResolvedCommand())
 	r.Register(newDebugLogCommand(nil))
+	r.Register(debug.NewDebugCommand())
 	r.Register(ssh.NewDebugHooksCommand(nil, ssh.DefaultSSHRetryStrategy, ssh.DefaultSSHPublicKeyRetryStrategy))
 	r.Register(ssh.NewDebugCodeCommand(nil, ssh.DefaultSSHRetryStrategy, ssh.DefaultSSHPublicKeyRetryStrategy))
 

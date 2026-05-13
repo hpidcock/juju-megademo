@@ -61,16 +61,18 @@ Only controller superusers may run this command, matching the existing
 
 ## TUI Layout
 
-The terminal is divided into three panes:
+The terminal is divided into a context bar and three panes:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Changestream Pane   [s]tep [r]esume [q]uit  [model tabs] │
+│ Controller: mycontroller  Model: mymodel  [m]odel [q]uit  │
+├──────────────────────────────────────────────────────────┤
+│ Changestream Pane   [s]tep [r]esume [q]uit               │
 │  ┌─────────────────────────────────────────────────────┐ │
 │  │ Transaction List                                    │ │
-│  │ ● 42  3 events  trace: abc…                         │ │
-│  │ 41  1 event   trace: def…                           │ │
-│  │ 40  5 events  trace: ghi…                           │ │
+│  │ ● 42  3 events  trace: abc123def456                 │ │
+│  │ 41  1 event   trace: def789abc012                   │ │
+│  │ 40  5 events  trace: ghi345jkl678                   │ │
 │  └─────────────────────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────────────┤
 │ Log Pane                                                 │
@@ -86,23 +88,47 @@ The terminal is divided into three panes:
 └──────────────────────────────────────────────────────────┘
 ```
 
+### Context Bar (top)
+
+A persistent bar at the very top of the TUI showing the current
+controller and model the TUI is operating on:
+
+- Left: controller name and model name (e.g. `Controller: mycontroller  Model: mymodel`).
+- Right: context-aware shortcuts (`[m]odel` to switch model, `[q]uit`).
+
+When the user presses `m`, a list of available models (including the
+controller model) is shown for selection. Switching models changes the
+changestream data displayed. Model switching is implemented in phase 3.
+
+All changestream actions (`s`, `S`, `p`, `r`) target the model shown
+in the context bar.
+
 ### Changestream Pane (top)
 
 This pane is the primary interaction surface. It consists of a header
 bar and a full-width transaction list:
 
 **Header bar**
-- Left: pane title ("Changestream Pane").
+- Left: pane title ("Changestream").
 - Centre: available shortcuts (`[s]tep [r]esume [q]uit`).
-- Right: model/controller tab bar when `--all` is active.
 
 **Transaction List**
-- Full-width scrollable list of recent transactions, newest at top.
-- Each row shows: `txn_id`, event count, and truncated trace ID.
-- A `●` dot marks the current (most recently stepped) transaction.
-- The selected/highlighted transaction populates the Trace Pane below.
-- When stepping, new transactions appear at the top as they are
-  consumed and the dot moves to the newest entry.
+- Full-width scrollable list of the most recent transactions, newest
+  at top, capped at 10 entries.
+- Each row shows: `txn_id`, event count, and full trace ID.
+- A `●` dot marks the next transaction to be stepped (the paused
+  position). This dot is **only shown when the changestream is in
+  paused or step mode**. When the TUI starts, the changestream is
+  running and no dot is displayed. After `p` (pause), the dot
+  appears next to the transaction at the paused position.
+- The selected/highlighted transaction populates the Trace Pane
+  below.
+- The transaction list is periodically refreshed (e.g. every 500ms)
+  to stay up-to-date. The list always shows the most recent 10
+  transactions. If a refresh returns a different set of transactions,
+  the list is replaced. This is especially important when the
+  changestream is running (not paused), since new transactions arrive
+  continuously.
 
 When `--all` is active, the tab bar in the header allows switching
 between databases. The transaction list updates to show entries for the
@@ -136,8 +162,8 @@ The trace view shows:
 | `S` | Changestream | Step forward N transactions (prompts for N) |
 | `p` | Changestream | Pause the changestream (calls `debug-pause` facade) |
 | `r` | Changestream | Resume the changestream (calls `debug-resume` facade) |
-| `Tab` | Changestream (multi-model) | Switch to next model/controller tab |
-| `Shift+Tab` | Changestream (multi-model) | Switch to previous tab |
+| `m` | Global | Switch model (prompts for selection) |
+| `Shift+Tab` | Changestream (multi-model) | Switch to previous tab (phase 3) |
 | `↑` / `↓` | Transaction List | Navigate transaction list |
 | `Enter` | Transaction List | Select transaction for Trace Pane |
 | `l` | Log Pane | Cycle log level (TRACE → DEBUG → INFO → WARNING → ERROR) |
@@ -193,17 +219,18 @@ active pane, while non-active panes receive only size-change messages.
 ### Sub-models
 
 **`changestreamModel`**
-- Maintains per-database state: name, status, txn_id, step_target.
+- Maintains per-database state: name, status (running/paused/step),
+  txn_id, step_target.
 - Polls the `DebugChangeStream` facade on a timed interval (e.g. 500ms)
-  to refresh status. This mirrors the polling that the stream worker
-  itself performs.
+  to refresh status and transaction list. This mirrors the polling
+  that the stream worker itself performs.
 - On `s`/`p`/`r` keypress, calls the corresponding facade method and
   immediately refreshes state.
-- Manages the scrollable transaction list. Each step response from the
-  facade includes the event count and txn_id range, which is prepended
-  to the list.
-- Tracks the current transaction (most recently stepped) and marks it
-  with a `●` indicator in the transaction list.
+- Manages the scrollable transaction list (capped at 10 entries).
+  Each refresh replaces the list if the returned set differs.
+- Tracks the paused position (next transaction to be stepped) and
+  marks it with a `●` indicator **only when paused or stepping**.
+  No dot is shown when the changestream is running.
 
 **`logModel`**
 - Wraps `bubbles/viewport` for scrollable log output.

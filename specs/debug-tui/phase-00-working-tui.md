@@ -2,9 +2,10 @@
 
 ## Goal
 
-`juju debug` launches a TUI that renders the 3-pane layout with mock data.
-No API calls, no model selection, no real data. This phase establishes the
-bubbletea program structure, sub-model composition, keybinding routing, and
+`juju debug` launches a TUI that renders the context bar and 3-pane
+layout with mock data. No API calls, no model selection, no real data.
+This phase establishes the bubbletea program structure, sub-model
+composition, keybinding routing, periodic changestream refresh, and
 terminal lifecycle management.
 
 ## Dependencies
@@ -46,6 +47,8 @@ Top-level bubbletea model:
 type debugModel struct {
     width        int
     height       int
+    controllerName string
+    modelName      string
     changestream changestreamModel
     log          logModel
     trace        traceModel
@@ -58,23 +61,27 @@ type debugModel struct {
 Implement `Init()`, `Update()`, and `View()`:
 
 - `Init()` returns a batch of all sub-model `Init()` results plus a
-  `tea.EnterAltScreen` command.
+  `tea.EnterAltScreen` command and a `changestreamTickMsg()` command.
 - `Update()` routes key messages to the appropriate sub-model:
   - `q` → set `quitting = true`, return `tea.Quit`
   - `?` → toggle `showHelp`
-  - `s`, `S`, `p`, `r` → forward to `changestreamModel` (no-op in this
-    phase, but must be routed)
+  - `s`, `S`, `p`, `r` → forward to `changestreamModel`
+  - `m` → no-op in this phase (model switching in phase 3)
   - `↑`, `↓`, `Enter` → forward to `changestreamModel`
   - `l`, `/` → forward to `logModel`
   - `Esc` → forward to whichever sub-model has an active input
   - `tea.WindowSizeMsg` → update `width`, `height`, propagate to all
     sub-models
+  - `changestreamTickMsg` → trigger a changestream refresh and schedule
+    the next tick
 - `View()`:
   - If `showHelp`, render `helpModel.View()` as a full-screen overlay.
-  - Otherwise, lay out the three panes vertically using lipgloss:
-    - Changestream pane (top, ~40% of height)
-    - Log pane (middle, ~35% of height)
-    - Trace pane (bottom, ~25% of height)
+  - Otherwise, lay out the context bar and three panes vertically using
+    lipgloss:
+    - Context bar (top, 1 row): controller name, model name, shortcuts
+    - Changestream pane (~40% of remaining height)
+    - Log pane (~35% of remaining height)
+    - Trace pane (~25% of remaining height)
   - Each pane has a bordered box with a title in the top-left corner.
 
 ### 3. Create `cmd/juju/debug/changestream.go`
@@ -85,7 +92,8 @@ type changestreamModel struct {
     height         int
     transactions   []transactionEntry
     cursor         int
-    currentTxnIdx  int
+    paused         bool
+    pausedTxnIdx   int
 }
 
 type transactionEntry struct {
@@ -98,24 +106,32 @@ type transactionEntry struct {
 
 - `Init()` returns nil.
 - `Update()`:
-  - `s`, `p`, `r` → no-op (return model unchanged).
+  - `p` → set `paused = true`, set `pausedTxnIdx = 0` (next txn at
+    cursor position). In this phase, pause is local only; no facade call.
+  - `r` → set `paused = false`, clear `pausedTxnIdx`. In this phase,
+    resume is local only.
+  - `s` → if `paused`, advance `pausedTxnIdx` to next transaction (if
+    any). No-op when not paused.
   - `↑` → decrement `cursor` (clamped to 0).
   - `↓` → increment `cursor` (clamped to `len(transactions)-1`).
-  - `Enter` → set `currentTxnIdx = cursor`, emit a `selectTxnMsg` to
-    the parent so the trace pane updates.
+  - `Enter` → emit a `selectTxnMsg` so the trace pane updates.
+  - `changestreamTickMsg` → call the mock refresh function, which
+    returns a new random set of up to 10 transactions. Replace
+    `transactions` if the returned set differs. Adjust `cursor` and
+    `pausedTxnIdx` to stay within bounds.
 - `View()`:
   - Header bar: left-aligned "Changestream", centre-aligned
-    `[s]tep [r]esume [q]uit`, right-aligned (empty in this phase).
+    `[s]tep [r]esume [q]uit`.
   - Transaction list: each row formatted as:
-    - `● <txnID>  <N> events  trace: <traceID>…` for the current
-      transaction (`currentTxnIdx`).
-    - `  <txnID>  <N> events  trace: <traceID>…` for all others.
+    - `● <txnID>  <N> events  trace: <traceID>` when the changestream
+      is paused and this row is the paused position (`pausedTxnIdx`).
+    - `  <txnID>  <N> events  trace: <traceID>` for all other rows.
+  - No `●` dot is displayed when the changestream is not paused.
   - Highlight the row at `cursor` using lipgloss reverse video.
-- Populate `transactions` with a hardcoded mock:
-  - `{TxnID: 42, EventCount: 3, TraceID: "abc123def456", SpanID: "1234567890ab"}`
-  - `{TxnID: 41, EventCount: 1, TraceID: "def789abc012", SpanID: "fedcba098765"}`
-  - `{TxnID: 40, EventCount: 5, TraceID: "ghi345jkl678", SpanID: "1a2b3c4d5e6f"}`
-- Set `currentTxnIdx = 0` and `cursor = 0`.
+- `refreshMockTransactions()` generates a random set of up to 10
+  transaction entries with incrementing txn_ids starting from a random
+  base, random event counts (1–5), and random hex trace/span IDs.
+  Each call returns different data so the TUI visibly updates.
 
 ### 4. Create `cmd/juju/debug/log.go`
 
@@ -198,7 +214,8 @@ type helpModel struct {
 ```
 
 - `View()` renders a bordered overlay listing all keybindings from the
-  spec's keybinding table.
+  spec's keybinding table, including the `m` keybinding for model
+  switching.
 
 ### 7. Create `cmd/juju/debug/messages.go`
 
@@ -208,6 +225,8 @@ Define all internal bubbletea messages:
 type selectTxnMsg struct {
     txnIndex int
 }
+
+type changestreamTickMsg time.Time
 ```
 
 ### 8. Create `cmd/juju/debug/command.go`
@@ -258,11 +277,18 @@ On completion, write `specs/debug-tui/memory/phase-00.md` containing:
 ## Acceptance Criteria
 
 - `go build ./cmd/juju/...` succeeds.
-- Running `juju debug` (with a terminal) displays the 3-pane TUI with
-  mock data.
+- Running `juju debug` (with a terminal) displays the context bar and
+  3-pane TUI with mock data.
+- The context bar shows controller and model names.
 - Arrow keys navigate the transaction list; `Enter` updates the Trace
   pane.
 - `q` exits the TUI cleanly and restores the terminal.
 - `?` shows the help overlay; `Esc` or `?` again dismisses it.
-- `s`, `p`, `r` are accepted without crashing (no-op).
+- `p` pauses the changestream (local state); a `●` dot appears next to
+  the paused transaction.
+- `r` resumes the changestream (local state); the `●` dot disappears.
+- `s` steps forward one transaction when paused.
+- No `●` dot is visible when the TUI first starts (running state).
+- The transaction list refreshes periodically with random mock data.
+- The transaction list is capped at 10 entries.
 - Terminal resize is handled without rendering artifacts.
