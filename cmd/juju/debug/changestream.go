@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -44,6 +45,9 @@ type changestreamModel struct {
 
 	api         DebugChangeStreamAPI
 	modelLister ModelListAPI
+
+	viewport viewport.Model
+	ready    bool
 }
 
 const maxTransactions = 10
@@ -204,14 +208,16 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 	case changestreamTickMsg:
 		ms := m.currentModelState()
 		if ms != nil && !ms.Paused {
-			// TODO(phase-04): Replace mock refresh with real facade Status call.
 			ms.Transactions = generateMockTransactions(ms.TxnID + int64(rand.IntN(20)+1))
 			m.clampCursor()
+		}
+		if m.ready {
+			m.viewport.SetContent(m.renderRows())
+			m.syncViewportToCursor()
 		}
 		return m, scheduleChangestreamTick()
 
 	case statusTickMsg:
-		// TODO(phase-04): Call api.Status(ctx) and update model states.
 		return m, m.scheduleStatusPoll()
 
 	case tea.KeyMsg:
@@ -220,10 +226,16 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 			if m.cursor > 0 {
 				m.cursor--
 			}
+			if m.ready {
+				m.syncViewportToCursor()
+			}
 		case "down":
 			ms := m.currentModelState()
 			if ms != nil && m.cursor < len(ms.Transactions)-1 {
 				m.cursor++
+			}
+			if m.ready {
+				m.syncViewportToCursor()
 			}
 		case "enter":
 			ms := m.currentModelState()
@@ -236,13 +248,11 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 		case "p":
 			ms := m.currentModelState()
 			if ms != nil && !ms.Paused {
-				// TODO(phase-04): Call DebugChangeStream.Pause facade method.
 				ms.Paused = true
 				ms.PausedTxnIdx = 0
 				ms.Status = "PAUSED"
 			}
 		case "P":
-			// TODO(phase-04): Call DebugChangeStream.Pause for all models.
 			for _, ms := range m.models {
 				if !ms.Paused {
 					ms.Paused = true
@@ -253,7 +263,6 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 		case "r":
 			ms := m.currentModelState()
 			if ms != nil && ms.Paused {
-				// TODO(phase-04): Call DebugChangeStream.Resume facade method.
 				ms.Paused = false
 				ms.PausedTxnIdx = -1
 				ms.Status = "RUNNING"
@@ -261,17 +270,27 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 		case "s":
 			ms := m.currentModelState()
 			if ms != nil && ms.Paused && ms.PausedTxnIdx >= 0 && ms.PausedTxnIdx < len(ms.Transactions)-1 {
-				// TODO(phase-04): Call DebugChangeStream.Step facade method.
 				ms.PausedTxnIdx++
 				ms.Status = "STEP"
 			}
 		case "S":
-			// TODO(phase-04): Implement step-N with prompt.
 		case "m":
 			return m, m.fetchModelsForPickerCmd()
 		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = max(m.Height(), 6)
+		vpHeight := max(m.height-4, 1)
+		m.viewport = viewport.New(msg.Width-4, vpHeight)
+		m.viewport.SetContent(m.renderRows())
+		m.ready = true
 	}
 
+	if m.ready {
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -307,6 +326,52 @@ func (m changestreamModel) currentModelState() *modelState {
 	return m.models[m.currentModel]
 }
 
+func (m changestreamModel) Height() int {
+	if m.height < 6 {
+		return 6
+	}
+	return m.height
+}
+
+func (m changestreamModel) renderRows() string {
+	ms := m.currentModelState()
+	if ms == nil {
+		return ""
+	}
+
+	highlightStyle := lipgloss.NewStyle().Reverse(true)
+	pausedDotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
+
+	var rows string
+	for i, txn := range ms.Transactions {
+		marker := "  "
+		if ms.Paused && i == ms.PausedTxnIdx {
+			marker = "● "
+		}
+		line := fmt.Sprintf("%s%d  %d events  trace: %s", marker, txn.TxnID, txn.EventCount, txn.TraceID)
+		if i == m.cursor {
+			line = highlightStyle.Render(line)
+		} else if ms.Paused && i == ms.PausedTxnIdx {
+			line = pausedDotStyle.Render(marker) + fmt.Sprintf("%d  %d events  trace: %s", txn.TxnID, txn.EventCount, txn.TraceID)
+		}
+		rows += line + "\n"
+	}
+	return rows
+}
+
+func (m *changestreamModel) syncViewportToCursor() {
+	if !m.ready || m.viewport.Height == 0 {
+		return
+	}
+	visibleStart := m.viewport.YOffset
+	visibleEnd := visibleStart + m.viewport.Height
+	if m.cursor < visibleStart {
+		m.viewport.SetYOffset(m.cursor)
+	} else if m.cursor >= visibleEnd {
+		m.viewport.SetYOffset(m.cursor - m.viewport.Height + 1)
+	}
+}
+
 func (m changestreamModel) View() string {
 	if m.pickerOpen {
 		return m.viewPicker()
@@ -324,13 +389,6 @@ func (m changestreamModel) viewNormal() string {
 	shortcutStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("228"))
-
-	highlightStyle := lipgloss.NewStyle().
-		Reverse(true)
-
-	pausedDotStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("2")).
-		Bold(true)
 
 	title := headerStyle.Render("Changestream")
 
@@ -364,24 +422,13 @@ func (m changestreamModel) viewNormal() string {
 
 	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", shortcuts, "  ", status, modelLabel)
 
-	rows := ""
-	if ms != nil {
-		for i, txn := range ms.Transactions {
-			marker := "  "
-			if ms.Paused && i == ms.PausedTxnIdx {
-				marker = "● "
-			}
-			line := fmt.Sprintf("%s%d  %d events  trace: %s", marker, txn.TxnID, txn.EventCount, txn.TraceID)
-			if i == m.cursor {
-				line = highlightStyle.Render(line)
-			} else if ms.Paused && i == ms.PausedTxnIdx {
-				line = pausedDotStyle.Render(marker) + fmt.Sprintf("%d  %d events  trace: %s", txn.TxnID, txn.EventCount, txn.TraceID)
-			}
-			rows += line + "\n"
-		}
+	var content string
+	if m.ready {
+		m.viewport.SetContent(m.renderRows())
+		content = headerLine + "\n" + m.viewport.View()
+	} else {
+		content = headerLine + "\n" + m.renderRows()
 	}
-
-	content := headerLine + "\n" + rows
 
 	borderColor := lipgloss.Color("62")
 	if m.active {
@@ -393,7 +440,7 @@ func (m changestreamModel) viewNormal() string {
 		PaddingLeft(1).
 		PaddingRight(1).
 		Width(m.width - 2).
-		Height(m.height - 2)
+		Height(m.Height() - 2)
 
 	return borderStyle.Render(content)
 }
