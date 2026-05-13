@@ -100,6 +100,9 @@ func (s *controllerSchemaSuite) TestControllerTables(c *tc.C) {
 		"change_log_edit_type",
 		"change_log_namespace",
 		"change_log_witness",
+		"change_log_txn_seq",
+		"change_log_trace_ctx",
+		"debug_change_stream",
 
 		// Cloud
 		"cloud",
@@ -355,6 +358,7 @@ func (s *controllerSchemaSuite) TestControllerTriggers(c *tc.C) {
 	additional := set.NewStrings(
 		"trg_secret_backend_immutable_update",
 		"trg_secret_backend_immutable_delete",
+		"change_log_set_trace",
 	)
 	got := readEntityNames(c, s.DB(), "trigger")
 	wanted := expected.Union(additional)

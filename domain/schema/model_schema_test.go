@@ -129,6 +129,9 @@ func (s *modelSchemaSuite) TestModelTables(c *tc.C) {
 		"change_log_edit_type",
 		"change_log_namespace",
 		"change_log_witness",
+		"change_log_txn_seq",
+		"change_log_trace_ctx",
+		"debug_change_stream",
 
 		// Model
 		"model",
@@ -772,6 +775,7 @@ func (s *modelSchemaSuite) TestModelTriggers(c *tc.C) {
 	additional := set.NewStrings(
 		"trg_model_immutable_delete",
 		"trg_model_immutable_update",
+		"change_log_set_trace",
 		"trg_application_controller_immutable_update",
 
 		"trg_secret_permission_guard_update",
