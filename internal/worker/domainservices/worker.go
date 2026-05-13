@@ -215,6 +215,14 @@ func (d *domainServices) DebugChangeStream() *debugchangestreamservice.Service {
 	return d.ModelDomainServices.DebugChangeStream()
 }
 
+// ControllerDomainSvc implements services.ControllerDomainServicesProvider.
+// It returns the embedded ControllerDomainServices directly, which dispatches
+// DebugChangeStream() to the controller database implementation rather than
+// the model override.
+func (d *domainServices) ControllerDomainSvc() services.ControllerDomainServices {
+	return d.ControllerDomainServices
+}
+
 // domainServicesGetter is a domain services getter that returns the services
 // for a model using the given model uuid. This is late binding, so the model
 // domain services is created on demand.

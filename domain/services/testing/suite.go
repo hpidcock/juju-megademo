@@ -272,6 +272,14 @@ func (d *domainServices) DebugChangeStream() *debugchangestreamservice.Service {
 	return d.ModelServices.DebugChangeStream()
 }
 
+// ControllerDomainSvc implements services.ControllerDomainServicesProvider.
+// It returns the embedded ControllerServices directly, which dispatches
+// DebugChangeStream() to the controller database implementation rather than
+// the model override.
+func (d *domainServices) ControllerDomainSvc() services.ControllerDomainServices {
+	return d.ControllerServices
+}
+
 // DomainServicesGetterWithStorageRegistry provides an implementation of the
 // DomainServicesGetterWithStorageRegistry interface to use in tests with the
 // additional storage provider.

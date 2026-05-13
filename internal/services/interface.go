@@ -199,6 +199,16 @@ type DomainServices interface {
 	ModelDomainServices
 }
 
+// ControllerDomainServicesProvider is an optional interface implemented by
+// combined DomainServices values. It provides access to the embedded
+// ControllerDomainServices without the ambiguity introduced by both
+// ControllerDomainServices and ModelDomainServices defining DebugChangeStream.
+type ControllerDomainServicesProvider interface {
+	// ControllerDomainSvc returns the embedded ControllerDomainServices,
+	// bypassing any method-level overrides on the combined DomainServices.
+	ControllerDomainSvc() ControllerDomainServices
+}
+
 // DomainServicesGetter represents a way to get a DomainServices for a given
 // model.
 type DomainServicesGetter interface {
