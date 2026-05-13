@@ -558,6 +558,9 @@ func registerCommands(r commandRegistry) {
 	r.Register(secretbackends.NewRemoveSecretBackendCommand())
 	r.Register(secretbackends.NewShowSecretBackendCommand())
 	r.Register(secretbackends.NewModelSecretBackendCommand())
+
+	// Debug commands.
+	r.Register(debug.NewDbDebugCommand())
 }
 
 type cloudToCommandAdaptor struct{}
