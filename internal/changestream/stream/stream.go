@@ -81,6 +81,12 @@ func (t *Term) Changes() []changestream.ChangeEvent {
 	return t.changes
 }
 
+// TxnMinID returns 0; stub until DB-backed values are wired up.
+func (t *Term) TxnMinID() int64 { return 0 }
+
+// TxnMaxID returns 0; stub until DB-backed values are wired up.
+func (t *Term) TxnMaxID() int64 { return 0 }
+
 // Done signals that the term has been completed.
 func (t *Term) Done(empty bool, abort <-chan struct{}) {
 	select {
@@ -508,6 +514,12 @@ func (e changeEvent) Namespace() string {
 func (e changeEvent) Changed() string {
 	return e.changed
 }
+
+// TraceID returns an empty string; tracing is not yet implemented.
+func (e changeEvent) TraceID() string { return "" }
+
+// SpanID returns an empty string; tracing is not yet implemented.
+func (e changeEvent) SpanID() string { return "" }
 
 func (s *Stream) readChanges() ([]changeEvent, error) {
 	// As this is a self instantiated query, we don't have a root context to tie

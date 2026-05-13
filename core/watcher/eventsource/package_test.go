@@ -130,6 +130,9 @@ func (e changeEvent) Changed() string {
 	return e.changed
 }
 
+func (e changeEvent) TraceID() string { return "" }
+func (e changeEvent) SpanID() string  { return "" }
+
 func singleton(s string) []string {
 	return []string{s}
 }

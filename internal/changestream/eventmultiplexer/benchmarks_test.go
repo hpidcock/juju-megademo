@@ -242,3 +242,5 @@ func (t term) Changes() ChangeSet {
 }
 
 func (t term) Done(empty bool, abort <-chan struct{}) {}
+func (t term) TxnMinID() int64                        { return 0 }
+func (t term) TxnMaxID() int64                        { return 0 }

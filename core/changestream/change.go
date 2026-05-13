@@ -39,6 +39,8 @@ const Deleted = delete
 const All = create | update | delete
 
 // ChangeEvent represents a new change set via the changestream.
+//
+//go:generate go run go.uber.org/mock/mockgen -typed -package mocks -destination mocks/changestream_mock.go github.com/juju/juju/core/changestream ChangeEvent
 type ChangeEvent interface {
 	// Type returns the type of change (create, update, delete).
 	Type() ChangeType
@@ -49,6 +51,14 @@ type ChangeEvent interface {
 	// the primary key of the row that was changed or the field of the change
 	// that was changed.
 	Changed() string
+	// TraceID returns the OpenTelemetry trace ID from the originating
+	// write transaction. Returns an empty string when no trace
+	// context was captured.
+	TraceID() string
+	// SpanID returns the OpenTelemetry span ID from the originating
+	// write transaction. Returns an empty string when no trace
+	// context was captured.
+	SpanID() string
 }
 
 // Term represents a set of changes that are bounded by a coalesced set.
@@ -67,4 +77,9 @@ type Term interface {
 	// Abort is used to signal that setting the empty value should be aborted
 	// and the term should be considered incomplete and done.
 	Done(empty bool, abort <-chan struct{})
+
+	// TxnMinID returns the lowest txn_id present in this term.
+	TxnMinID() int64
+	// TxnMaxID returns the highest txn_id present in this term.
+	TxnMaxID() int64
 }

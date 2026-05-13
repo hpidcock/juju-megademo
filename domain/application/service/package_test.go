@@ -155,3 +155,6 @@ func (c *changeEvent) Namespace() string {
 func (c *changeEvent) Changed() string {
 	return c.changed
 }
+
+func (c *changeEvent) TraceID() string { return "" }
+func (c *changeEvent) SpanID() string  { return "" }

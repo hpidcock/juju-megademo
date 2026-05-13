@@ -2363,6 +2363,9 @@ func (c *changeEvent) Type() changestream.ChangeType {
 	return c.changeType
 }
 
+func (c *changeEvent) TraceID() string { return "" }
+func (c *changeEvent) SpanID() string  { return "" }
+
 // TestWatchObsoleteMapperSendObsoleteRevisionAndRemovedURIs tests the behavior of the mapper function
 // when it receives obsolete revision events and secret change events.
 // Only owned secret events and owned obsolete revision events will be processed.

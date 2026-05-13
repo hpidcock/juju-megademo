@@ -112,3 +112,79 @@ func (c *MockTermDoneCall) DoAndReturn(f func(bool, <-chan struct{})) *MockTermD
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// TxnMaxID mocks base method.
+func (m *MockTerm) TxnMaxID() int64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TxnMaxID")
+	ret0, _ := ret[0].(int64)
+	return ret0
+}
+
+// TxnMaxID indicates an expected call of TxnMaxID.
+func (mr *MockTermMockRecorder) TxnMaxID() *MockTermTxnMaxIDCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TxnMaxID", reflect.TypeOf((*MockTerm)(nil).TxnMaxID))
+	return &MockTermTxnMaxIDCall{Call: call}
+}
+
+// MockTermTxnMaxIDCall wrap *gomock.Call
+type MockTermTxnMaxIDCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockTermTxnMaxIDCall) Return(arg0 int64) *MockTermTxnMaxIDCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockTermTxnMaxIDCall) Do(f func() int64) *MockTermTxnMaxIDCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockTermTxnMaxIDCall) DoAndReturn(f func() int64) *MockTermTxnMaxIDCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// TxnMinID mocks base method.
+func (m *MockTerm) TxnMinID() int64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TxnMinID")
+	ret0, _ := ret[0].(int64)
+	return ret0
+}
+
+// TxnMinID indicates an expected call of TxnMinID.
+func (mr *MockTermMockRecorder) TxnMinID() *MockTermTxnMinIDCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TxnMinID", reflect.TypeOf((*MockTerm)(nil).TxnMinID))
+	return &MockTermTxnMinIDCall{Call: call}
+}
+
+// MockTermTxnMinIDCall wrap *gomock.Call
+type MockTermTxnMinIDCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockTermTxnMinIDCall) Return(arg0 int64) *MockTermTxnMinIDCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockTermTxnMinIDCall) Do(f func() int64) *MockTermTxnMinIDCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockTermTxnMinIDCall) DoAndReturn(f func() int64) *MockTermTxnMinIDCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

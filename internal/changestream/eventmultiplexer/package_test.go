@@ -95,6 +95,9 @@ func (c changeEvent) Changed() string {
 	return c.changed
 }
 
+func (c changeEvent) TraceID() string { return "" }
+func (c changeEvent) SpanID() string  { return "" }
+
 type waitGroup struct {
 	ch            chan struct{}
 	state, amount uint64
