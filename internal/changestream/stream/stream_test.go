@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -1558,6 +1559,87 @@ func (s *streamSuite) TestCreateWatermarkTwice(c *tc.C) {
 
 	err = stream.createWatermark()
 	c.Assert(err, tc.ErrorIsNil)
+}
+
+func (s *streamSuite) TestReadChangesTraceIDAndSpanID(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	s.insertNamespace(c, 4000, "tracens")
+
+	_, err := s.DB().ExecContext(
+		c.Context(),
+		`INSERT INTO change_log
+			(edit_type_id, namespace_id, changed)
+			VALUES (2, ?, ?)`,
+		4000,
+		uuid.MustNewUUID().String(),
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	_, err = s.DB().ExecContext(
+		c.Context(),
+		`UPDATE change_log
+			SET trace_id = ?, span_id = ?
+			WHERE id = (SELECT MAX(id) FROM change_log)`,
+		"trace-abc",
+		"span-xyz",
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	results, err := stream.readChanges()
+	c.Assert(err, tc.ErrorIsNil)
+	c.Assert(results, tc.HasLen, 1)
+	c.Check(results[0].TraceID(), tc.Equals, "trace-abc")
+	c.Check(results[0].SpanID(), tc.Equals, "span-xyz")
+}
+
+func (s *streamSuite) TestTermTxnMinIDAndTxnMaxID(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	s.insertNamespace(c, 5000, "txnns")
+
+	for _, txnID := range []int64{5, 3, 7} {
+		_, err := s.DB().ExecContext(
+			c.Context(),
+			`INSERT INTO change_log
+				(edit_type_id, namespace_id, changed, txn_id)
+				VALUES (2, ?, ?, ?)`,
+			5000,
+			uuid.MustNewUUID().String(),
+			txnID,
+		)
+		c.Assert(err, tc.ErrorIsNil)
+	}
+
+	results, err := stream.readChanges()
+	c.Assert(err, tc.ErrorIsNil)
+	c.Assert(results, tc.HasLen, 3)
+
+	term := &Term{done: make(chan bool)}
+	txnMin := int64(math.MaxInt64)
+	txnMax := int64(math.MinInt64)
+	for _, ch := range results {
+		term.changes = append(term.changes, ch)
+		if ch.txnID < txnMin {
+			txnMin = ch.txnID
+		}
+		if ch.txnID > txnMax {
+			txnMax = ch.txnID
+		}
+	}
+	if txnMin != math.MaxInt64 {
+		term.txnMin = txnMin
+	}
+	if txnMax != math.MinInt64 {
+		term.txnMax = txnMax
+	}
+
+	c.Check(term.TxnMinID(), tc.Equals, int64(3))
+	c.Check(term.TxnMaxID(), tc.Equals, int64(7))
 }
 
 func (s *streamSuite) newNonRunningStream() *Stream {

@@ -74,6 +74,8 @@ type FileNotifier interface {
 type Term struct {
 	changes []changestream.ChangeEvent
 	done    chan bool
+	txnMin  int64
+	txnMax  int64
 }
 
 // Changes returns the changes that are part of the term.
@@ -81,11 +83,11 @@ func (t *Term) Changes() []changestream.ChangeEvent {
 	return t.changes
 }
 
-// TxnMinID returns 0; stub until DB-backed values are wired up.
-func (t *Term) TxnMinID() int64 { return 0 }
+// TxnMinID returns the minimum txn_id across all changes in the term.
+func (t *Term) TxnMinID() int64 { return t.txnMin }
 
-// TxnMaxID returns 0; stub until DB-backed values are wired up.
-func (t *Term) TxnMaxID() int64 { return 0 }
+// TxnMaxID returns the maximum txn_id across all changes in the term.
+func (t *Term) TxnMaxID() int64 { return t.txnMax }
 
 // Done signals that the term has been completed.
 func (t *Term) Done(empty bool, abort <-chan struct{}) {
@@ -368,8 +370,10 @@ OUTER:
 					done: make(chan bool),
 				}
 
-				lower = int64(math.MaxInt64)
-				upper = int64(math.MinInt64)
+				lower  = int64(math.MaxInt64)
+				upper  = int64(math.MinInt64)
+				txnMin = int64(math.MaxInt64)
+				txnMax = int64(math.MinInt64)
 			)
 			for _, change := range changes {
 				if traceEnabled {
@@ -383,6 +387,18 @@ OUTER:
 				if change.id > upper {
 					upper = change.id
 				}
+				if change.txnID < txnMin {
+					txnMin = change.txnID
+				}
+				if change.txnID > txnMax {
+					txnMax = change.txnID
+				}
+			}
+			if txnMin != math.MaxInt64 {
+				term.txnMin = txnMin
+			}
+			if txnMax != math.MinInt64 {
+				term.txnMax = txnMax
 			}
 			if lower == math.MaxInt64 || upper == math.MinInt64 {
 				// This should never happen, but if it does, just continue.
@@ -476,7 +492,8 @@ const (
 	// If the namespace is later deleted, you'll no longer locate that during
 	// a select.
 	selectQuery = `
-SELECT MAX(c.id), c.edit_type_id, n.namespace, changed, created_at
+SELECT MAX(c.id), c.edit_type_id, n.namespace, c.changed,
+       c.created_at, c.txn_id, c.trace_id, c.span_id
 	FROM change_log c
 		JOIN change_log_edit_type t ON c.edit_type_id = t.id
 		JOIN change_log_namespace n ON c.namespace_id = n.id
@@ -495,6 +512,9 @@ type changeEvent struct {
 	namespace  string
 	changed    string
 	createdAt  string
+	txnID      int64
+	traceID    string
+	spanID     string
 }
 
 // Type returns the type of change (create, update, delete).
@@ -515,11 +535,11 @@ func (e changeEvent) Changed() string {
 	return e.changed
 }
 
-// TraceID returns an empty string; tracing is not yet implemented.
-func (e changeEvent) TraceID() string { return "" }
+// TraceID returns the trace ID associated with the change.
+func (e changeEvent) TraceID() string { return e.traceID }
 
-// SpanID returns an empty string; tracing is not yet implemented.
-func (e changeEvent) SpanID() string { return "" }
+// SpanID returns the span ID associated with the change.
+func (e changeEvent) SpanID() string { return e.spanID }
 
 func (s *Stream) readChanges() ([]changeEvent, error) {
 	// As this is a self instantiated query, we don't have a root context to tie
@@ -543,6 +563,9 @@ func (s *Stream) readChanges() ([]changeEvent, error) {
 				&changes[i].namespace,
 				&changes[i].changed,
 				&changes[i].createdAt,
+				&changes[i].txnID,
+				&changes[i].traceID,
+				&changes[i].spanID,
 			}
 		}
 		for i := 0; rows.Next(); i++ {
