@@ -18,6 +18,7 @@ import (
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/model"
 	"github.com/juju/juju/core/objectstore"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/internal/errors"
 	internalworker "github.com/juju/juju/internal/worker"
@@ -294,11 +295,20 @@ func (w *Worker) loop() error {
 			return w.catacomb.ErrDying()
 
 		case <-cfgWatcher.Changes():
-			if err := w.handleConfigChange(ctx); err != nil {
+			if err := w.handleConfigChange(
+				cfgWatcher.ChangeContext(ctx),
+			); err != nil {
 				return errors.Capture(err)
 			}
 
 		case <-drainingWatcher.Changes():
+			ctx, span := trace.Start(
+				drainingWatcher.ChangeContext(ctx),
+				trace.Name("handle-draining-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "object-store-drainer"),
+				),
+			)
 			phase, err := w.guardService.GetDrainingPhase(ctx)
 			if err != nil {
 				return errors.Capture(err)
@@ -310,17 +320,23 @@ func (w *Worker) loop() error {
 				w.logger.Infof(ctx, "object store is not draining, unlocking guard")
 
 				if err := w.guard.Unlock(ctx); err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Errorf("failed to update guard: %v", err)
 				}
+				span.End()
 				continue
 			} else if phase == objectstore.PhaseError {
 				w.logger.Errorf(ctx, "object store is in an error state, manual intervention required")
+				span.End()
 				continue
 			}
 
 			w.logger.Infof(ctx, "object store is draining, locking guard")
 
 			if err := w.guard.Lockdown(ctx); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("failed to update guard: %v", err)
 			}
 
@@ -331,12 +347,16 @@ func (w *Worker) loop() error {
 			// Drain the agent binary object store, then drain all the models.
 			if err := w.drainAgentBinaries(ctx); err != nil {
 				_ = w.guardService.SetDrainingPhase(ctx, objectstore.PhaseError)
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("draining agent binaries: %w", err)
 			}
 
 			namespaces, err := w.controllerService.GetModelNamespaces(ctx)
 			if err != nil {
 				_ = w.guardService.SetDrainingPhase(ctx, objectstore.PhaseError)
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("getting model namespaces: %w", err)
 			}
 
@@ -344,6 +364,8 @@ func (w *Worker) loop() error {
 			if len(uniqueNamespaces) == 0 {
 				if err := w.completeDraining(ctx); err != nil {
 					_ = w.guardService.SetDrainingPhase(ctx, objectstore.PhaseError)
+					span.RecordError(err)
+					span.End()
 					return errors.Errorf("completing draining: %w", err)
 				}
 			}
@@ -351,26 +373,38 @@ func (w *Worker) loop() error {
 			signal, err := w.drainModels(ctx, uniqueNamespaces)
 			if err != nil {
 				_ = w.guardService.SetDrainingPhase(ctx, objectstore.PhaseError)
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("draining models: %w", err)
 			}
 
 			if err := w.waitForDraining(ctx, signal, uniqueNamespaces); err != nil {
 				_ = w.guardService.SetDrainingPhase(ctx, objectstore.PhaseError)
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("waiting for draining: %w", err)
 			}
 
 			if err := w.completeDraining(ctx); err != nil {
 				_ = w.guardService.SetDrainingPhase(ctx, objectstore.PhaseError)
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("completing draining: %w", err)
 			}
+			span.End()
 		}
 	}
 }
 
 // HandleConfigChange starts the whole draining process if the object store
 // type has changed.
-func (w *Worker) handleConfigChange(ctx context.Context) error {
-	_, err := w.controllerConfigService.ControllerConfig(ctx)
+func (w *Worker) handleConfigChange(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
+	_, err = w.controllerConfigService.ControllerConfig(ctx)
 	if err != nil {
 		return errors.Capture(err)
 	}

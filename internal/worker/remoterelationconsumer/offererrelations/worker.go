@@ -18,6 +18,7 @@ import (
 	"github.com/juju/juju/core/life"
 	"github.com/juju/juju/core/logger"
 	corerelation "github.com/juju/juju/core/relation"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/rpc/params"
 )
@@ -175,6 +176,14 @@ func (w *offererRelationsWorker) loop() error {
 				continue
 			}
 
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-relation-status-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "offerer-relations"),
+				),
+			)
+
 			// We only care about the most recent change.
 			// We must ensure that all changes being sent must be sent in order.
 			change := changes[len(changes)-1]
@@ -188,6 +197,7 @@ func (w *offererRelationsWorker) loop() error {
 				SuspendedReason:        change.SuspendedReason,
 			}
 
+			span.End()
 			select {
 			case <-w.catacomb.Dying():
 				return w.catacomb.ErrDying()

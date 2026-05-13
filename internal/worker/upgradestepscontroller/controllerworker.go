@@ -17,6 +17,7 @@ import (
 	"github.com/juju/juju/api/base"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/status"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/upgrade"
 	jujuversion "github.com/juju/juju/core/version"
 	"github.com/juju/juju/core/watcher"
@@ -193,18 +194,34 @@ func (w *controllerWorker) run() error {
 			return w.catacomb.ErrDying()
 
 		case <-completedWatcher.Changes():
+			ctx, span := trace.Start(
+				completedWatcher.ChangeContext(ctx),
+				trace.Name("upgrade-steps-completed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "upgrade-steps-controller"),
+				),
+			)
 			// All the controllers have completed their upgrade steps, so
 			// we can now proceed with the upgrade.
 			w.logger.Infof(ctx, "upgrade to %v completed successfully.", w.base.ToVersion)
 			_ = w.base.StatusSetter.SetStatus(ctx, status.Started, "", nil)
 			w.base.UpgradeCompleteLock.Unlock()
+			span.End()
 
 			return nil
 
 		case <-failedWatcher.Changes():
+			ctx, span := trace.Start(
+				failedWatcher.ChangeContext(ctx),
+				trace.Name("upgrade-steps-failed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "upgrade-steps-controller"),
+				),
+			)
 			// One or all of the controllers have failed their upgrade steps,
 			// so we can't proceed with the upgrade.
 			w.logger.Errorf(ctx, "upgrade steps failed")
+			span.End()
 			return w.abort(ctx, upgradeUUID, upgradesteps.ErrFailedUpgradeSteps)
 
 		case err := <-stepsWorker.Err():

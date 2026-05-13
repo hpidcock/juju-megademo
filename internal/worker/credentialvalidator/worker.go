@@ -12,6 +12,7 @@ import (
 
 	"github.com/juju/juju/api/base"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -140,16 +141,28 @@ func (v *validator) loop() error {
 			if !ok {
 				return v.catacomb.ErrDying()
 			}
+			ctx, span := trace.Start(
+				v.modelCredentialWatcher.ChangeContext(ctx),
+				trace.Name("handle-credential-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "credential-validator"),
+				),
+			)
 			updatedCredential, err := modelCredential(ctx, v.validatorFacade)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			if v.credential.CloudCredential != updatedCredential.CloudCredential {
+				span.End()
 				return ErrModelCredentialChanged
 			}
 			if v.credential.Valid != updatedCredential.Valid {
+				span.End()
 				return ErrValidityChanged
 			}
+			span.End()
 		}
 	}
 }

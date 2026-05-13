@@ -16,6 +16,7 @@ import (
 
 	coreerrors "github.com/juju/juju/core/errors"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/internal/errors"
@@ -166,12 +167,23 @@ func (w *prunerWorker) loop() error {
 				continue
 			}
 
+			ctx, span := trace.Start(
+				watch.ChangeContext(ctx),
+				trace.Name("handle-config-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "operation-pruner"),
+				),
+			)
 			cfg, err := w.config.ModelConfig.ModelConfig(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("getting model config: %w", err)
 			}
 			w.updateConfig(ctx, cfg)
 			err = w.doPrune(ctx, pruneTimer)
+			span.RecordError(err)
+			span.End()
 			if err != nil {
 				return errors.Capture(err)
 			}

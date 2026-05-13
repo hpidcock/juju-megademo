@@ -16,6 +16,7 @@ import (
 
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/secrets"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -131,7 +132,9 @@ func (w *Worker) loop() (err error) {
 			if !ok {
 				return errors.New("secret revision expiry change channel closed")
 			}
-			w.handleSecretRevisionExpiryChanges(ctx, ch)
+			w.handleSecretRevisionExpiryChanges(
+				changes.ChangeContext(ctx), ch,
+			)
 		case now := <-timeout:
 			w.expire(ctx, now)
 		}
@@ -175,6 +178,8 @@ func expiryKey(uri *secrets.URI, revision int) string {
 }
 
 func (w *Worker) handleSecretRevisionExpiryChanges(ctx context.Context, changes []watcher.SecretTriggerChange) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer span.End()
 	w.config.Logger.Debugf(ctx, "got revision expiry secret changes: %#v", changes)
 	if len(changes) == 0 {
 		return

@@ -16,6 +16,7 @@ import (
 	coreapplication "github.com/juju/juju/core/application"
 	"github.com/juju/juju/core/logger"
 	corerelation "github.com/juju/juju/core/relation"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/domain/relation"
 	relationerrors "github.com/juju/juju/domain/relation/errors"
@@ -191,22 +192,32 @@ func (w *localWorker) loop() error {
 
 			w.logger.Debugf(ctx, "local relation units changed for %v", w.consumerRelationUUID)
 
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-local-relation-units-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "consumer-unit-relations"),
+				),
+			)
+
 			unitRelationInfo, err := w.service.GetRelationUnits(ctx, w.consumerRelationUUID, w.consumerApplicationUUID)
 			if errors.Is(err, relationerrors.RelationNotFound) {
-				// If the relation has been removed, the worker can be cleanly
-				// exited. The parent worker will clean up the offerer unit
-				// worker once that has been witnessed.
+				span.End()
 				return nil
 			} else if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotatef(
 					err, "fetching local side of relation %v", w.consumerRelationUUID)
 			}
 
 			if unitRelationInfo.Empty() {
+				span.End()
 				continue
 			}
 
 			event = unitRelationInfo
+			span.End()
 
 			// Send in lockstep so we don't drop events.
 			select {

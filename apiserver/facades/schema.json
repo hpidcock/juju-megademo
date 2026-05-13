@@ -504,6 +504,12 @@
                         "error": {
                             "$ref": "#/definitions/Error"
                         },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
+                        },
                         "watcher-id": {
                             "type": "string"
                         }

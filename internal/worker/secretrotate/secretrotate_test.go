@@ -4,6 +4,7 @@
 package secretrotate_test
 
 import (
+	"context"
 	stdtesting "testing"
 	"time"
 
@@ -88,6 +89,7 @@ func (s *workerSuite) testValidateConfig(c *tc.C, f func(*secretrotate.Config), 
 func (s *workerSuite) expectWorker() {
 	s.facade.EXPECT().WatchSecretsRotationChanges(gomock.Any(), s.config.SecretOwners).Return(s.rotateWatcher, nil)
 	s.rotateWatcher.EXPECT().Changes().AnyTimes().Return(s.rotateConfigChanges)
+	s.rotateWatcher.EXPECT().ChangeContext(gomock.Any()).AnyTimes().Return(context.Background())
 	s.rotateWatcher.EXPECT().Kill().MaxTimes(1)
 	s.rotateWatcher.EXPECT().Wait().Return(nil).MinTimes(1)
 }

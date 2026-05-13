@@ -4,6 +4,7 @@
 package instancepoller
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -730,6 +731,7 @@ func (s *workerSuite) startWorker(c *tc.C, ctrl *gomock.Controller) (worker.Work
 	}).AnyTimes()
 	watcher.EXPECT().Kill().AnyTimes()
 	watcher.EXPECT().Wait().AnyTimes()
+	watcher.EXPECT().ChangeContext(gomock.Any()).Return(context.Background()).AnyTimes()
 
 	w, err := NewWorker(Config{
 		Clock:          mocked.clock,

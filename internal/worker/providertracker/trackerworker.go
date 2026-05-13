@@ -16,6 +16,7 @@ import (
 	corelife "github.com/juju/juju/core/life"
 	"github.com/juju/juju/core/logger"
 	coremodel "github.com/juju/juju/core/model"
+	coretrace "github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher/eventsource"
 	modelerrors "github.com/juju/juju/domain/model/errors"
 	"github.com/juju/juju/environs"
@@ -239,18 +240,31 @@ func (t *trackerWorker) loop() (err error) {
 			if !ok {
 				return errors.New("model config watch closed")
 			}
+			ctx, span := coretrace.Start(
+				modelConfigWatcher.ChangeContext(ctx),
+				coretrace.Name("handle-model-config-change"),
+				coretrace.WithAttributes(
+					coretrace.StringAttr("worker", "provider-tracker"),
+				),
+			)
 			logger.Debugf(ctx, "reloading model config")
 
 			modelConfig, err := t.config.ConfigService.ModelConfig(ctx)
 			if errors.Is(err, modelerrors.NotFound) {
 				logger.Infof(ctx, "model %q (%s) has been removed, stopping tracker worker", t.model.Name, t.model.UUID)
+				span.End()
 				return nil
 			} else if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "reading model config")
 			}
 			if err = t.provider.SetConfig(ctx, modelConfig); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "updating provider config")
 			}
+			span.End()
 
 		case _, ok := <-cloudSpecChanges:
 			if !ok {
@@ -263,19 +277,31 @@ func (t *trackerWorker) loop() (err error) {
 			}
 
 		case <-modelWatcher.Changes():
+			ctx, span := coretrace.Start(
+				modelWatcher.ChangeContext(ctx),
+				coretrace.Name("handle-model-change"),
+				coretrace.WithAttributes(
+					coretrace.StringAttr("worker", "provider-tracker"),
+				),
+			)
 			model, err := t.config.ModelService.Model(ctx)
 			if errors.Is(err, modelerrors.NotFound) {
 				// The model has been removed, we can stop the worker.
 				logger.Infof(ctx, "model %q (%s) has been removed, stopping tracker worker", t.model.Name, t.model.UUID)
+				span.End()
 				return nil
 			} else if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "reading model")
 			}
 			if corelife.IsDead(model.Life) {
 				// The model is dead, we can stop the worker.
 				logger.Infof(ctx, "model %q (%s) is dead, stopping tracker worker", model.Name, model.UUID)
+				span.End()
 				return nil
 			}
+			span.End()
 		}
 	}
 }

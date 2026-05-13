@@ -620,6 +620,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -794,6 +800,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -1249,6 +1261,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -1488,6 +1506,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -1888,6 +1912,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -1951,6 +1981,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -2218,6 +2254,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -2669,6 +2711,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -2769,6 +2817,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -2873,6 +2927,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -3149,6 +3209,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -3534,6 +3600,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -4106,6 +4178,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -4316,6 +4394,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -4446,6 +4530,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -6053,6 +6143,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -6456,6 +6552,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -6890,6 +6992,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -7125,6 +7233,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -7472,6 +7586,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -8277,6 +8397,12 @@
                         "error": {
                             "$ref": "#/definitions/Error"
                         },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
+                        },
                         "watcher-id": {
                             "type": "string"
                         }
@@ -8361,6 +8487,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -9354,6 +9486,12 @@
                         "error": {
                             "$ref": "#/definitions/Error"
                         },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
+                        },
                         "watcher-id": {
                             "type": "string"
                         }
@@ -9387,6 +9525,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -9557,6 +9701,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -12032,6 +12182,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -12459,6 +12615,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"
@@ -12953,6 +13115,12 @@
                         "error": {
                             "$ref": "#/definitions/Error"
                         },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
+                        },
                         "watcher-id": {
                             "type": "string"
                         }
@@ -13424,6 +13592,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -13645,6 +13819,12 @@
                         "error": {
                             "$ref": "#/definitions/Error"
                         },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
+                        },
                         "watcher-id": {
                             "type": "string"
                         }
@@ -13730,6 +13910,12 @@
                         },
                         "error": {
                             "$ref": "#/definitions/Error"
+                        },
+                        "span-id": {
+                            "type": "string"
+                        },
+                        "trace-id": {
+                            "type": "string"
                         },
                         "watcher-id": {
                             "type": "string"

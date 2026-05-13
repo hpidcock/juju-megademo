@@ -15,6 +15,7 @@ import (
 	coredatabase "github.com/juju/juju/core/database"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/model"
+	"github.com/juju/juju/core/trace"
 	modelerrors "github.com/juju/juju/domain/model/errors"
 	"github.com/juju/juju/internal/errors"
 	internalworker "github.com/juju/juju/internal/worker"
@@ -111,19 +112,31 @@ func (w *Worker) loop() error {
 			return w.catacomb.ErrDying()
 
 		case <-watcher.Changes():
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-dead-models"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "undertaker"),
+				),
+			)
 			// Get all of the dead models from the controller model service
 			// and handle them all at once.
 			models, err := w.controllerModelService.GetDeadModels(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Errorf("getting dead models: %w", err)
 			}
 
 			// Attempt to handle dead models first, this is graceful death.
 			for _, mUUID := range models {
 				if err := w.handleDeadModel(ctx, mUUID); err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Errorf("handling dead model %s: %w", mUUID, err)
 				}
 			}
+			span.End()
 		}
 	}
 }

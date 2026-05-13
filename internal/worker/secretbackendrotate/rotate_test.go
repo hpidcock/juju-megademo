@@ -77,6 +77,7 @@ func (s *workerSuite) testValidateConfig(c *tc.C, f func(*secretbackendrotate.Co
 func (s *workerSuite) expectWorker() {
 	s.facade.EXPECT().WatchTokenRotationChanges(gomock.Any()).Return(s.rotateWatcher, nil)
 	s.rotateWatcher.EXPECT().Changes().AnyTimes().Return(s.rotateConfigChanges)
+	s.rotateWatcher.EXPECT().ChangeContext(gomock.Any()).AnyTimes().Return(context.Background())
 	s.rotateWatcher.EXPECT().Kill().MaxTimes(1)
 	s.rotateWatcher.EXPECT().Wait().Return(nil).MinTimes(1)
 

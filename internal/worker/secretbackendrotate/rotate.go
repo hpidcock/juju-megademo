@@ -14,6 +14,7 @@ import (
 	"github.com/juju/worker/v5/catacomb"
 
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -117,7 +118,9 @@ func (w *Worker) loop() (err error) {
 			if !ok {
 				return errors.New("secret rotation change channel closed")
 			}
-			w.handleTokenRotateChanges(ctx, ch)
+			w.handleTokenRotateChanges(
+				changes.ChangeContext(ctx), ch,
+			)
 		case now := <-timeout:
 			if err := w.rotate(ctx, now); err != nil {
 				return errors.Annotatef(err, "rotating secret backends")
@@ -151,6 +154,8 @@ func (w *Worker) rotate(ctx context.Context, now time.Time) error {
 }
 
 func (w *Worker) handleTokenRotateChanges(ctx context.Context, changes []watcher.SecretBackendRotateChange) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer span.End()
 	w.config.Logger.Debugf(ctx, "got rotate secret changes: %#v", changes)
 	if len(changes) == 0 {
 		return

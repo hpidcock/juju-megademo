@@ -156,14 +156,24 @@ func (w *s3Worker) loop() (err error) {
 			return w.catacomb.ErrDying()
 
 		case <-watcher.Changes():
+			ctx, span := coretrace.Start(
+				watcher.ChangeContext(ctx),
+				coretrace.Name("handle-backend-change"),
+				coretrace.WithAttributes(
+					coretrace.StringAttr("worker", "object-store-s3-caller"),
+				),
+			)
 			client, err := w.makeNewClient(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 
 			w.mutex.Lock()
 			w.session = client
 			w.mutex.Unlock()
+			span.End()
 
 			w.reportInternalState(stateClientUpdated)
 		}

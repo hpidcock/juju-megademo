@@ -284,6 +284,7 @@ func (s *containerWorkerSuite) notify(messages ...[]string) {
 	s.stringsWatcher.EXPECT().Kill().AnyTimes()
 	s.stringsWatcher.EXPECT().Wait().Return(nil).AnyTimes()
 	s.stringsWatcher.EXPECT().Changes().Return(ch)
+	s.stringsWatcher.EXPECT().ChangeContext(gomock.Any()).Return(context.Background()).AnyTimes()
 }
 
 // expectContainerManagerConfig sets up expectations associated with

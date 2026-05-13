@@ -16,6 +16,7 @@ import (
 
 	"github.com/juju/juju/api"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	controllernodeerrors "github.com/juju/juju/domain/controllernode/errors"
 	internalworker "github.com/juju/juju/internal/worker"
@@ -226,6 +227,13 @@ func (w *remoteWorker) loop() error {
 
 		case <-watcher.Changes():
 			w.cfg.Logger.Debugf(ctx, "remoteWorker API server change")
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-api-address-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "api-remote-caller"),
+				),
+			)
 
 			// Get the latest API addresses for all controller nodes.
 			servers, err := w.cfg.ControllerNodeService.GetAPIAddressesByControllerIDForAgents(ctx)
@@ -235,8 +243,11 @@ func (w *remoteWorker) loop() error {
 				// proceed. Yet we shouldn't stop the worker coming up, so we
 				// log the error and continue to wait for the next change.
 				w.cfg.Logger.Warningf(ctx, "no API addresses available for remote workers: %v", err)
+				span.End()
 				continue
 			} else if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 
@@ -256,6 +267,8 @@ func (w *remoteWorker) loop() error {
 				server, err := w.newRemoteServer(ctx, target, addresses)
 				if err != nil {
 					w.cfg.Logger.Errorf(ctx, "failed to start remote worker for %q: %v", target, err)
+					span.RecordError(err)
+					span.End()
 					return errors.Trace(err)
 				}
 
@@ -284,6 +297,7 @@ func (w *remoteWorker) loop() error {
 			w.cfg.Logger.Debugf(ctx, "remote workers updated: %v", required)
 
 			w.reportInternalState(stateChanged)
+			span.End()
 
 		case subscriber := <-w.subscribeCh:
 			subscribers[subscriber.id] = subscriber

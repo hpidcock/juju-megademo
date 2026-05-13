@@ -597,12 +597,24 @@ func (u *Uniter) terminate(ctx stdcontext.Context) error {
 			if !ok {
 				return errors.New("unit watcher closed")
 			}
+			ctx, span := coretrace.Start(
+				unitWatcher.ChangeContext(ctx),
+				coretrace.Name("handle-unit-change"),
+				coretrace.WithAttributes(
+					coretrace.StringAttr("worker", "uniter"),
+				),
+			)
 			if err := u.unit.Refresh(ctx); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			if hasSubs, err := u.unit.HasSubordinates(ctx); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			} else if hasSubs {
+				span.End()
 				continue
 			}
 			// The unit is known to be Dying; so if it didn't have subordinates
@@ -617,25 +629,34 @@ func (u *Uniter) terminate(ctx stdcontext.Context) error {
 			u.logger.Debugf(ctx, "deleting secret content")
 			secrets, err := u.secretsClient.UnitOwnedSecretsAndRevisions(ctx, u.unit.Tag())
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			backend, err := u.secretsBackendGetter()
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			for _, s := range secrets {
 				for _, rev := range s.Revisions {
 					err = backend.DeleteContent(ctx, s.URI, rev)
 					if err != nil {
+						span.RecordError(err)
+						span.End()
 						return errors.Annotatef(err, "deleting secret content for %s/%d", s.URI.ID, rev)
 					}
 				}
 			}
 
 			if err := u.unit.EnsureDead(ctx); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 
+			span.End()
 			return u.stopUnitError(ctx)
 		}
 	}

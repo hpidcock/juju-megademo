@@ -16,6 +16,7 @@ import (
 	coreerrors "github.com/juju/juju/core/errors"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/objectstore"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/internal/errors"
 	jworker "github.com/juju/juju/internal/worker"
@@ -131,14 +132,21 @@ func (w *agentConfigUpdater) loop() error {
 			if !ok {
 				return errors.New("watcher channel closed")
 			}
-			if err := w.handleConfigChange(ctx); err != nil {
+			if err := w.handleConfigChange(
+				watcher.ChangeContext(ctx),
+			); err != nil {
 				return errors.Capture(err)
 			}
 		}
 	}
 }
 
-func (w *agentConfigUpdater) handleConfigChange(ctx context.Context) error {
+func (w *agentConfigUpdater) handleConfigChange(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	config, err := w.config.ControllerConfigService.ControllerConfig(ctx)
 	if err != nil {
 		return errors.Capture(err)

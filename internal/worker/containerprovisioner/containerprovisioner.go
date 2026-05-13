@@ -19,6 +19,7 @@ import (
 	"github.com/juju/juju/core/instance"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/semversion"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
@@ -194,12 +195,22 @@ func (p *containerProvisioner) loop() error {
 			if !ok {
 				return errors.New("model configuration watch closed")
 			}
+			ctx, span := trace.Start(
+				modelWatcher.ChangeContext(ctx),
+				trace.Name("handle-model-config-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "container-provisioner"),
+				),
+			)
 			modelConfig, err := p.controllerAPI.ModelConfig(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "cannot load model configuration")
 			}
 			p.configObserver.notify(modelConfig)
 			task.SetNumProvisionWorkers(modelConfig.NumContainerProvisionWorkers())
+			span.End()
 		}
 	}
 }

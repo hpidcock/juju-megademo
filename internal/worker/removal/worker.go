@@ -14,6 +14,7 @@ import (
 
 	coreerrors "github.com/juju/juju/core/errors"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/domain/removal"
 	"github.com/juju/juju/internal/errors"
 	internalworker "github.com/juju/juju/internal/worker"
@@ -115,7 +116,9 @@ func (w *removalWorker) loop() (err error) {
 			return w.catacomb.ErrDying()
 		case jobIDs := <-watch.Changes():
 			w.cfg.Logger.Infof(ctx, "got removal job changes: %v", jobIDs)
-			if err := w.processRemovalJobs(ctx); err != nil {
+			if err := w.processRemovalJobs(
+				watch.ChangeContext(ctx),
+			); err != nil {
 				return errors.Capture(err)
 			}
 			timer.Reset(jobCheckMaxInterval)
@@ -135,7 +138,12 @@ func (w *removalWorker) loop() (err error) {
 // This is safe due to the following conditions:
 // - This is the only method adding workers to the runner.
 // - It is only invoked from cases in the main event loop, so is Goroutine safe.
-func (w *removalWorker) processRemovalJobs(ctx context.Context) error {
+func (w *removalWorker) processRemovalJobs(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	jobs, err := w.cfg.RemovalService.GetAllJobs(ctx)
 	if err != nil {
 		return errors.Capture(err)

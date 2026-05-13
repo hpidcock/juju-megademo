@@ -20,6 +20,7 @@ import (
 	"github.com/juju/juju/core/machine"
 	"github.com/juju/juju/core/network"
 	"github.com/juju/juju/core/status"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	domainmachine "github.com/juju/juju/domain/machine"
 	machineerrors "github.com/juju/juju/domain/machine/errors"
@@ -241,15 +242,27 @@ func (u *updaterWorker) loop() error {
 				return errors.New("machines watcher closed")
 			}
 
+			ctx, span := trace.Start(
+				watch.ChangeContext(ctx),
+				trace.Name("handle-machines-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "instance-poller"),
+				),
+			)
 			for _, name := range names {
 				machineName := machine.Name(name)
 				if err := machineName.Validate(); err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Annotate(err, "validating emitted machine name")
 				}
 				if err := u.queueMachineForPolling(ctx, machineName); err != nil {
+					span.RecordError(err)
+					span.End()
 					return err
 				}
 			}
+			span.End()
 		case <-shortPollTimer.Chan():
 			if err := u.pollGroupMembers(ctx, shortPollGroup); err != nil {
 				return err

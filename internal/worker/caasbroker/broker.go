@@ -13,6 +13,7 @@ import (
 	"github.com/juju/juju/caas"
 	"github.com/juju/juju/controller"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/environs"
 	environscloudspec "github.com/juju/juju/environs/cloudspec"
@@ -131,6 +132,7 @@ func (t *Tracker) loop() error {
 	// Some environs support reacting to changes in the cloud config.
 	// Set up a watcher if that's the case.
 	var (
+		cloudWatcher        watcher.NotifyWatcher
 		cloudWatcherChanges watcher.NotifyChannel
 		cloudSpecSetter     environs.CloudSpecSetter
 		ok                  bool
@@ -138,7 +140,7 @@ func (t *Tracker) loop() error {
 	if cloudSpecSetter, ok = t.broker.(environs.CloudSpecSetter); !ok {
 		logger.Warningf(ctx, "cloud type %v doesn't support dynamic changing of cloud spec", t.broker.Config().Type())
 	} else {
-		cloudWatcher, err := t.config.ConfigAPI.WatchCloudSpecChanges(ctx)
+		cloudWatcher, err = t.config.ConfigAPI.WatchCloudSpecChanges(ctx)
 		if err != nil {
 			return errors.Annotate(err, "cannot watch environ cloud spec")
 		}
@@ -157,30 +159,55 @@ func (t *Tracker) loop() error {
 			if !ok {
 				return errors.New("model config watch closed")
 			}
+			ctx, span := trace.Start(
+				modelWatcher.ChangeContext(ctx),
+				trace.Name("handle-model-config-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "caas-broker"),
+				),
+			)
 			logger.Debugf(ctx, "reloading model config")
 			modelConfig, err := t.config.ConfigAPI.ModelConfig(context.TODO())
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "cannot read model config")
 			}
 			if err = t.broker.SetConfig(ctx, modelConfig); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "cannot update model config")
 			}
+			span.End()
 		case _, ok := <-cloudWatcherChanges:
 			if !ok {
 				return errors.New("cloud watch closed")
 			}
+			ctx, span := trace.Start(
+				cloudWatcher.ChangeContext(ctx),
+				trace.Name("handle-cloud-spec-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "caas-broker"),
+				),
+			)
 			cloudSpec, err := t.config.ConfigAPI.CloudSpec(context.TODO())
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "cannot read model config")
 			}
 			if reflect.DeepEqual(cloudSpec, t.currentCloudSpec) {
+				span.End()
 				continue
 			}
 			logger.Debugf(ctx, "reloading cloud config")
 			if err = cloudSpecSetter.SetCloudSpec(ctx, cloudSpec); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "cannot update broker cloud spec")
 			}
 			t.currentCloudSpec = cloudSpec
+			span.End()
 		}
 	}
 }

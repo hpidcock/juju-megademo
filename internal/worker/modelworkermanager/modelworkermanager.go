@@ -21,6 +21,7 @@ import (
 	"github.com/juju/juju/core/life"
 	corelogger "github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/model"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/internal/pki"
 	"github.com/juju/juju/internal/services"
@@ -212,7 +213,9 @@ func (m *modelWorkerManager) loop() error {
 				return errors.New("changes stopped")
 			}
 			for _, modelUUID := range uuids {
-				if err := m.modelChanged(ctx, modelUUID); err != nil {
+				if err := m.modelChanged(
+					watcher.ChangeContext(ctx), modelUUID,
+				); err != nil {
 					return errors.Trace(err)
 				}
 			}
@@ -220,7 +223,12 @@ func (m *modelWorkerManager) loop() error {
 	}
 }
 
-func (m *modelWorkerManager) modelChanged(ctx context.Context, modelUUID string) error {
+func (m *modelWorkerManager) modelChanged(ctx context.Context, modelUUID string) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	model, err := m.config.ModelService.Model(ctx, model.UUID(modelUUID))
 
 	// If the model is not found, it means two things, either it was removed or

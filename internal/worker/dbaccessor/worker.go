@@ -17,6 +17,7 @@ import (
 
 	"github.com/juju/juju/core/database"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/domain/controllernode/service"
 	"github.com/juju/juju/domain/controllernode/state"
 	internaldatabase "github.com/juju/juju/internal/database"
@@ -363,7 +364,10 @@ func (w *dbWorker) loop() (err error) {
 
 		case <-w.cfg.ControllerConfigWatcher.Changes():
 			w.cfg.Logger.Infof(ctx, "controller configuration changed on disk")
-			if err := w.handleClusterConfigChange(ctx, true); err != nil {
+			if err := w.handleClusterConfigChange(
+				ctx,
+				true,
+			); err != nil {
 				return errors.Trace(err)
 			}
 
@@ -791,7 +795,12 @@ func (w *dbWorker) deleteDatabase(ctx context.Context, namespace string) error {
 // the current running state of this node, and takes action as appropriate.
 // The input argument determines whether the inability to read the config
 // should be considered an error condition.
-func (w *dbWorker) handleClusterConfigChange(ctx context.Context, noConfigIsFatal bool) error {
+func (w *dbWorker) handleClusterConfigChange(ctx context.Context, noConfigIsFatal bool) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

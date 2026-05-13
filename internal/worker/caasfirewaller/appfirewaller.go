@@ -15,6 +15,7 @@ import (
 	coreerrors "github.com/juju/juju/core/errors"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/network"
+	"github.com/juju/juju/core/trace"
 	domainapplicationerrors "github.com/juju/juju/domain/application/errors"
 	"github.com/juju/juju/internal/errors"
 )
@@ -49,7 +50,12 @@ func (w *appFirewaller) ensureOpenPorts(
 	ctx context.Context,
 	mutator PortMutator,
 	lastCheckPoint network.GroupedPortRanges,
-) (network.GroupedPortRanges, error) {
+) (ret network.GroupedPortRanges, err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	changedPortRanges, err := w.portService.GetApplicationOpenedPortsByEndpoint(ctx, w.appUUID)
 	if err != nil {
 		return nil, err
@@ -155,7 +161,10 @@ func (w *appFirewaller) loop() (err error) {
 				ctx, "received application %q port change event", w.appUUID,
 			)
 
-			lastCheckPoint, err = w.ensureOpenPorts(ctx, portMutator, lastCheckPoint)
+			lastCheckPoint, err = w.ensureOpenPorts(
+				portsWatcher.ChangeContext(ctx),
+				portMutator, lastCheckPoint,
+			)
 			if err != nil {
 				return err
 			}

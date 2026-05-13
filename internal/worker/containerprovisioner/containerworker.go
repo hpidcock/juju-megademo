@@ -13,6 +13,7 @@ import (
 	"github.com/juju/worker/v5/catacomb"
 
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -62,7 +63,7 @@ func (w *ContainerSetupAndProvisioner) work() error {
 
 	// Wait for a container of w.ContainerType type to be
 	// found.
-	if err := w.waitForContainers(); err != nil {
+	if err := w.waitForContainers(ctx); err != nil {
 		return err
 	}
 	if err := w.checkDying(); err != nil {
@@ -123,7 +124,7 @@ func (w *ContainerSetupAndProvisioner) checkDying() error {
 
 // waitForContainers waits for a container of the type
 // configured in this worker to be deployed and returns.
-func (w *ContainerSetupAndProvisioner) waitForContainers() error {
+func (w *ContainerSetupAndProvisioner) waitForContainers(ctx context.Context) error {
 	for {
 		select {
 		case <-w.catacomb.Dying():
@@ -135,6 +136,14 @@ func (w *ContainerSetupAndProvisioner) waitForContainers() error {
 			if len(containerIds) == 0 {
 				continue
 			}
+			_, span := trace.Start(
+				w.containerWatcher.ChangeContext(ctx),
+				trace.Name("container-detected"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "container-setup"),
+				),
+			)
+			span.End()
 			return nil
 		}
 	}

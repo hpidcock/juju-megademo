@@ -4,6 +4,7 @@
 package secretexpire_test
 
 import (
+	"context"
 	stdtesting "testing"
 	"time"
 
@@ -97,6 +98,7 @@ func (s *workerSuite) testValidateConfig(c *tc.C, f func(*secretexpire.Config), 
 func (s *workerSuite) expectWorker() {
 	s.facade.EXPECT().WatchSecretRevisionsExpiryChanges(gomock.Any(), s.config.SecretOwners).Return(s.triggerWatcher, nil)
 	s.triggerWatcher.EXPECT().Changes().AnyTimes().Return(s.expiryConfigChanges)
+	s.triggerWatcher.EXPECT().ChangeContext(gomock.Any()).AnyTimes().Return(context.Background())
 	s.triggerWatcher.EXPECT().Kill().MaxTimes(1)
 	s.triggerWatcher.EXPECT().Wait().Return(nil).MinTimes(1)
 }

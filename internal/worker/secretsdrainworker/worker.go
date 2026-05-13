@@ -14,6 +14,7 @@ import (
 	"github.com/juju/juju/core/leadership"
 	"github.com/juju/juju/core/logger"
 	coresecrets "github.com/juju/juju/core/secrets"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	jujusecrets "github.com/juju/juju/internal/secrets"
 )
@@ -106,9 +107,17 @@ waitforchanges:
 				return errors.New("secret backend changed watch closed")
 			}
 			w.config.Logger.Debugf(ctx, "got new secret backend")
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("drain-secrets"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "secrets-drain"),
+				),
+			)
 			for {
 				switch err := w.drainSecrets(); {
 				case err == nil:
+					span.End()
 					continue waitforchanges
 				case errors.Is(err, leadership.ErrLeadershipChanged):
 					// If leadership changes during the drain operation,
@@ -116,6 +125,8 @@ waitforchanges:
 					w.config.Logger.Warningf(ctx, "leadership changed, restarting drain operation")
 					continue
 				default:
+					span.RecordError(err)
+					span.End()
 					return errors.Trace(err)
 				}
 			}

@@ -24,6 +24,7 @@ import (
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/model"
 	"github.com/juju/juju/core/secrets"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	jworker "github.com/juju/juju/internal/worker"
 	"github.com/juju/juju/internal/worker/uniter/api"
@@ -530,7 +531,9 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if !ok {
 				return errors.New("unit watcher closed")
 			}
-			if err := w.unitChanged(ctx); err != nil {
+			if err := w.unitChanged(
+				unitw.ChangeContext(ctx),
+			); err != nil {
 				return errors.Trace(err)
 			}
 			observedEvent(&seenUnitChange)
@@ -540,7 +543,9 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if !ok {
 				return errors.New("resolve mode watcher closed")
 			}
-			if err := w.resolveModeChanged(ctx); err != nil {
+			if err := w.resolveModeChanged(
+				resolveModew.ChangeContext(ctx),
+			); err != nil {
 				return errors.Trace(err)
 			}
 			observedEvent(&seenResolveModeChange)
@@ -550,7 +555,9 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if !ok {
 				return errors.New("application watcher closed")
 			}
-			if err := w.applicationChanged(ctx); err != nil {
+			if err := w.applicationChanged(
+				applicationw.ChangeContext(ctx),
+			); err != nil {
 				return errors.Trace(err)
 			}
 			observedEvent(&seenApplicationChange)
@@ -573,7 +580,15 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if len(hashes) != 1 {
 				return errors.New("expected one hash in config change")
 			}
+			_, span := trace.Start(
+				charmConfigw.ChangeContext(ctx),
+				trace.Name("config-hash-changed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "uniter-remote-state"),
+				),
+			)
 			w.configHashChanged(hashes[0])
+			span.End()
 			observedEvent(&seenConfigChange)
 
 		case hashes, ok := <-trustConfigw.Changes():
@@ -584,7 +599,15 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if len(hashes) != 1 {
 				return errors.New("expected one hash in trust config change")
 			}
+			_, span := trace.Start(
+				trustConfigw.ChangeContext(ctx),
+				trace.Name("trust-hash-changed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "uniter-remote-state"),
+				),
+			)
 			w.trustHashChanged(hashes[0])
+			span.End()
 			observedEvent(&seenTrustConfigChange)
 
 		case hashes, ok := <-addressesChanges:
@@ -603,7 +626,15 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if !ok {
 				return errors.New("actions watcher closed")
 			}
+			_, span := trace.Start(
+				actionsw.ChangeContext(ctx),
+				trace.Name("actions-changed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "uniter-remote-state"),
+				),
+			)
 			w.actionsChanged(actions)
+			span.End()
 			observedEvent(&seenActionsChange)
 
 		case keys, ok := <-relationsw.Changes():
@@ -611,7 +642,9 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if !ok {
 				return errors.New("relations watcher closed")
 			}
-			if err := w.relationsChanged(ctx, keys); err != nil {
+			if err := w.relationsChanged(
+				relationsw.ChangeContext(ctx), keys,
+			); err != nil {
 				return errors.Trace(err)
 			}
 			observedEvent(&seenRelationsChange)
@@ -621,7 +654,9 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			if !ok {
 				return errors.New("storage watcher closed")
 			}
-			if err := w.storageChanged(ctx, keys); err != nil {
+			if err := w.storageChanged(
+				storagew.ChangeContext(ctx), keys,
+			); err != nil {
 				return errors.Trace(err)
 			}
 			observedEvent(&seenStorageChange)
@@ -633,13 +668,24 @@ func (w *RemoteStateWatcher) loop(unitTag names.UnitTag) (err error) {
 			}
 			observedEvent(&seenUpdateStatusIntervalChange)
 
+			ctx, span := trace.Start(
+				updateStatusIntervalw.ChangeContext(ctx),
+				trace.Name("update-status-interval-changed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "uniter-remote-state"),
+				),
+			)
+
 			var err error
 			updateStatusInterval, err = w.client.UpdateStatusHookInterval(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			wasActive := updateStatusTimer != nil
 			resetUpdateStatusTimer()
+			span.End()
 			if wasActive {
 				// This is not the first time we've seen an update
 				// status interval change, so there's no need to
@@ -778,7 +824,12 @@ func (w *RemoteStateWatcher) retryHookTimerTriggered() {
 }
 
 // unitChanged responds to changes in the unit.
-func (w *RemoteStateWatcher) unitChanged(ctx context.Context) error {
+func (w *RemoteStateWatcher) unitChanged(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	if err := w.unit.Refresh(ctx); err != nil {
 		return errors.Trace(err)
 	}
@@ -791,7 +842,12 @@ func (w *RemoteStateWatcher) unitChanged(ctx context.Context) error {
 	return nil
 }
 
-func (w *RemoteStateWatcher) resolveModeChanged(ctx context.Context) error {
+func (w *RemoteStateWatcher) resolveModeChanged(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	resolveMode, err := w.unit.Resolved(ctx)
 	if err != nil {
 		return errors.Trace(err)
@@ -803,7 +859,12 @@ func (w *RemoteStateWatcher) resolveModeChanged(ctx context.Context) error {
 }
 
 // applicationChanged responds to changes in the application.
-func (w *RemoteStateWatcher) applicationChanged(ctx context.Context) error {
+func (w *RemoteStateWatcher) applicationChanged(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	if err := w.application.Refresh(ctx); err != nil {
 		return errors.Trace(err)
 	}
@@ -1054,7 +1115,12 @@ func (w *RemoteStateWatcher) expireSecretRevisions(revisions []string) {
 }
 
 // relationsChanged responds to application relation changes.
-func (w *RemoteStateWatcher) relationsChanged(ctx context.Context, keys []string) error {
+func (w *RemoteStateWatcher) relationsChanged(ctx context.Context, keys []string) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -1147,10 +1213,18 @@ func (w *RemoteStateWatcher) watchRelationUnits(ctx context.Context, rel api.Rel
 		if !ok {
 			return errors.New("relation units watcher closed")
 		}
+		_, span := trace.Start(
+			ruw.ChangeContext(ctx),
+			trace.Name("handle-relation-units-change"),
+			trace.WithAttributes(
+				trace.StringAttr("worker", "uniter-remote-state"),
+			),
+		)
 		for unit, settings := range change.Changed {
 			relationSnapshot.Members[unit] = settings.Version
 		}
 		maps.Copy(relationSnapshot.ApplicationMembers, change.AppChanged)
+		span.End()
 	}
 	// Wrap the Changes() with the relationId so we can process all changes
 	// via the same channel.
@@ -1206,7 +1280,12 @@ func (w *RemoteStateWatcher) actionsChanged(actions []string) {
 }
 
 // storageChanged responds to unit storage changes.
-func (w *RemoteStateWatcher) storageChanged(ctx context.Context, keys []string) error {
+func (w *RemoteStateWatcher) storageChanged(ctx context.Context, keys []string) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	tags := make([]names.StorageTag, len(keys))
 	for i, key := range keys {
 		tags[i] = names.NewStorageTag(key)
@@ -1283,6 +1362,13 @@ func (w *RemoteStateWatcher) watchStorageAttachment(
 			saw.Kill()
 			return errors.Errorf("storage attachment watcher closed for %s", w.unit.Tag().Id())
 		}
+		ctx, span := trace.Start(
+			saw.ChangeContext(ctx),
+			trace.Name("handle-storage-attachment-change"),
+			trace.WithAttributes(
+				trace.StringAttr("worker", "uniter-remote-state"),
+			),
+		)
 		var err error
 		storageSnapshot, err = getStorageSnapshot(ctx, w.client, tag, w.unit.Tag())
 		if errors.Is(err, errors.NotProvisioned) {
@@ -1293,8 +1379,11 @@ func (w *RemoteStateWatcher) watchStorageAttachment(
 			storageSnapshot = StorageSnapshot{Life: life}
 		} else if err != nil {
 			saw.Kill()
+			span.RecordError(err)
+			span.End()
 			return errors.Annotatef(err, "processing initial storage attachment change for %s", w.unit.Tag().Id())
 		}
+		span.End()
 	}
 	innerSAW, err := newStorageAttachmentWatcher(
 		w.client, saw, w.unit.Tag(), tag, w.storageAttachmentChanges,

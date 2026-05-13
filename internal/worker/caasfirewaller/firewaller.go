@@ -14,6 +14,7 @@ import (
 	coreerrors "github.com/juju/juju/core/errors"
 	"github.com/juju/juju/core/life"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	applicationerrors "github.com/juju/juju/domain/application/errors"
 	"github.com/juju/juju/internal/errors"
 	internalworker "github.com/juju/juju/internal/worker"
@@ -84,7 +85,9 @@ func (p *firewaller) loop() error {
 
 			for _, app := range apps {
 				appUUID := application.UUID(app)
-				err := p.observeApplicationFirewallChange(ctx, appUUID)
+				err := p.observeApplicationFirewallChange(
+					w.ChangeContext(ctx), appUUID,
+				)
 				if err != nil {
 					return err
 				}
@@ -149,7 +152,12 @@ func NewFirewallerWorker(config FirewallerConfig) (worker.Worker, error) {
 // removed.
 func (p *firewaller) observeApplicationFirewallChange(
 	ctx context.Context, appUUID application.UUID,
-) error {
+) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	appLife, err := p.appService.GetApplicationLife(ctx, appUUID)
 	if errors.Is(err, applicationerrors.ApplicationNotFound) {
 		// Application no longer exists, make sure that any workers are stopped.

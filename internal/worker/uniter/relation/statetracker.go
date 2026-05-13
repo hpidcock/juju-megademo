@@ -16,6 +16,7 @@ import (
 	"github.com/juju/juju/core/life"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/relation"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/domain/deployment/charm"
 	"github.com/juju/juju/domain/deployment/charm/hooks"
 	"github.com/juju/juju/internal/worker/uniter/api"
@@ -198,27 +199,41 @@ func (r *relationStateTracker) joinRelation(ctx stdcontext.Context, rel api.Rela
 			if !ok {
 				return errors.New("unit watcher closed")
 			}
+			ctx, span := trace.Start(
+				unitWatcher.ChangeContext(ctx),
+				trace.Name("join-relation"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "relation-state-tracker"),
+				),
+			)
 			err := relationer.Join(ctx)
 			if params.IsCodeCannotEnterScopeYet(err) {
 				r.logger.Infof(ctx, "cannot enter scope for relation %q; waiting for subordinate to be removed", rel)
 				continue
 			} else if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			// Leaders get to set the relation status.
 			var isLeader bool
 			isLeader, err = r.leaderCtx.IsLeader()
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			r.logger.Debugf(ctx, "unit %q (leader=%v) entered scope for relation %q", unitName, isLeader, rel)
 			if isLeader {
 				err = rel.SetStatus(ctx, relation.Joined)
 				if err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Trace(err)
 				}
 			}
 			r.relationers[rel.Id()] = relationer
+			span.End()
 			return nil
 		}
 	}

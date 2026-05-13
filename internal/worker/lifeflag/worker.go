@@ -13,6 +13,7 @@ import (
 
 	apilifeflag "github.com/juju/juju/api/agent/lifeflag"
 	"github.com/juju/juju/core/life"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -148,18 +149,24 @@ func (w *Worker) loop() error {
 		case <-watcher.Changes():
 			current := w.Check()
 
-			if err := w.lifeChanged(ctx, current); err != nil {
+			if err := w.lifeChanged(
+				watcher.ChangeContext(ctx), current,
+			); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (w *Worker) lifeChanged(ctx context.Context, current bool) error {
+func (w *Worker) lifeChanged(ctx context.Context, current bool) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
-	var err error
 	w.life, err = w.config.Facade.Life(ctx, w.config.Entity)
 	if w.config.NotFoundIsDead && errors.Is(err, ErrNotFound) {
 		w.life = life.Dead

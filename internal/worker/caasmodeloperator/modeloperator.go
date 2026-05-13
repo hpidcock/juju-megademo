@@ -15,6 +15,7 @@ import (
 	"github.com/juju/juju/caas"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/semversion"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/internal/cloudconfig/podcfg"
 	"github.com/juju/juju/internal/password"
@@ -80,7 +81,7 @@ func (m *ModelOperatorManager) loop() error {
 		case <-m.catacomb.Dying():
 			return m.catacomb.ErrDying()
 		case <-watcher.Changes():
-			err := m.update(ctx)
+			err := m.update(watcher.ChangeContext(ctx))
 			if err != nil {
 				return errors.Annotate(err, "failed to update model operator")
 			}
@@ -93,7 +94,12 @@ func (m *ModelOperatorManager) scopedContext() (context.Context, context.CancelF
 	return m.catacomb.Context(ctx), cancel
 }
 
-func (m *ModelOperatorManager) update(ctx context.Context) error {
+func (m *ModelOperatorManager) update(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	m.logger.Debugf(ctx, "gathering model operator provisioning information for model %s", m.modelUUID)
 	info, err := m.api.ModelOperatorProvisioningInfo(ctx)
 	if err != nil {

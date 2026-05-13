@@ -21,6 +21,7 @@ import (
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/migration"
 	"github.com/juju/juju/core/network"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/internal/worker/fortress"
 	"github.com/juju/juju/rpc"
@@ -213,7 +214,10 @@ func (w *Worker) loop() error {
 			if !ok {
 				return errors.New("watcher channel closed")
 			}
-			if err := w.handle(ctx, status); err != nil {
+			if err := w.handle(
+				watch.ChangeContext(ctx),
+				status,
+			); err != nil {
 				w.config.Logger.Errorf(ctx, "handling migration phase %s failed: %v", status.Phase, err)
 				return errors.Trace(err)
 			}
@@ -221,7 +225,12 @@ func (w *Worker) loop() error {
 	}
 }
 
-func (w *Worker) handle(ctx context.Context, status watcher.MigrationStatus) error {
+func (w *Worker) handle(ctx context.Context, status watcher.MigrationStatus) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	w.config.Logger.Infof(ctx, "migration phase is now: %s", status.Phase)
 
 	if !status.Phase.IsRunning() {
@@ -263,7 +272,7 @@ func (w *Worker) handle(ctx context.Context, status watcher.MigrationStatus) err
 
 	// Ensure that all workers related to migration fortress have
 	// stopped and aren't allowed to restart.
-	err := w.config.Guard.Lockdown(ctx)
+	err = w.config.Guard.Lockdown(ctx)
 	if errors.Cause(err) == fortress.ErrAborted {
 		return w.catacomb.ErrDying()
 	} else if err != nil {

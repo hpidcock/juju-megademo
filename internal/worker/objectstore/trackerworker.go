@@ -232,7 +232,9 @@ func (t *trackerWorker) loop() error {
 			return t.catacomb.ErrDying()
 
 		case <-modelWatcher.Changes():
-			if done, err := t.checkModel(ctx); err != nil {
+			if done, err := t.checkModel(
+				modelWatcher.ChangeContext(ctx),
+			); err != nil {
 				return errors.Trace(err)
 			} else if done {
 				return nil
@@ -243,7 +245,12 @@ func (t *trackerWorker) loop() error {
 
 // checkModel checks the model state and returns true if the worker
 // should stop (model is dead or not found).
-func (t *trackerWorker) checkModel(ctx context.Context) (bool, error) {
+func (t *trackerWorker) checkModel(ctx context.Context) (done bool, err error) {
+	ctx, span := coretrace.Start(ctx, coretrace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	m, err := t.modelService.Model(ctx)
 	if errors.Is(err, modelerrors.NotFound) {
 		t.logger.Infof(ctx, "model %q has been removed, stopping tracker worker", t.modelUUID)

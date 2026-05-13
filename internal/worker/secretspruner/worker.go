@@ -11,6 +11,7 @@ import (
 	"github.com/juju/worker/v5/catacomb"
 
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -68,7 +69,12 @@ func (w *Worker) Wait() error {
 	return w.catacomb.Wait()
 }
 
-func (w *Worker) processChanges(ctx context.Context) error {
+func (w *Worker) processChanges(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	return w.config.SecretsFacade.DeleteObsoleteUserSecretRevisions(ctx)
@@ -97,7 +103,9 @@ func (w *Worker) loop() (err error) {
 				return errors.New("secret prune changed watch closed")
 			}
 			w.config.Logger.Debugf(ctx, "maybe have user secret revisions to prune")
-			if err := w.processChanges(ctx); err != nil {
+			if err := w.processChanges(
+				watcher.ChangeContext(ctx),
+			); err != nil {
 				return errors.Trace(err)
 			}
 		}

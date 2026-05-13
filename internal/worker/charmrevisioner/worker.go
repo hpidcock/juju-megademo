@@ -24,6 +24,7 @@ import (
 	corehttp "github.com/juju/juju/core/http"
 	"github.com/juju/juju/core/logger"
 	coremodel "github.com/juju/juju/core/model"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/os/ostype"
 	"github.com/juju/juju/core/version"
 	"github.com/juju/juju/core/watcher"
@@ -272,12 +273,23 @@ func (w *revisionUpdateWorker) loop() error {
 				continue
 			}
 
+			ctx, span := trace.Start(
+				configWatcher.ChangeContext(ctx),
+				trace.Name("handle-model-config-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "charm-revisioner"),
+				),
+			)
+
 			logger.Debugf(ctx, "refreshing charmhubClient due to model config change")
 
 			charmhubClient, err = w.getCharmhubClient(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return internalerrors.Capture(err)
 			}
+			span.End()
 		}
 	}
 }

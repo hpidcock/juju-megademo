@@ -15,6 +15,7 @@ import (
 	"github.com/juju/juju/core/database"
 	"github.com/juju/juju/core/life"
 	"github.com/juju/juju/core/model"
+	"github.com/juju/juju/core/trace"
 	modelerrors "github.com/juju/juju/domain/model/errors"
 )
 
@@ -116,20 +117,26 @@ func (w *Worker) loop() error {
 			// Get the current life value to ensure we have the latest state.
 			// If the life value has changed, we will bounce.
 			currentCheck := w.Check()
-			if err := w.lifeChanged(ctx, modelUUID, currentCheck); err != nil {
+			if err := w.lifeChanged(
+				watcher.ChangeContext(ctx), modelUUID, currentCheck,
+			); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (w *Worker) lifeChanged(ctx context.Context, modelUUID model.UUID, current bool) error {
+func (w *Worker) lifeChanged(ctx context.Context, modelUUID model.UUID, current bool) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
 	modelService := w.config.ModelService
 
-	var err error
 	w.life, err = modelService.GetModelLife(ctx, modelUUID)
 	if errors.Is(err, modelerrors.NotFound) ||
 		errors.Is(err, database.ErrDBDead) ||

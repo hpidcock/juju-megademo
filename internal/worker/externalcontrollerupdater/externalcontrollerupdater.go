@@ -18,6 +18,7 @@ import (
 	"github.com/juju/juju/api"
 	"github.com/juju/juju/api/controller/crosscontroller"
 	"github.com/juju/juju/core/crossmodel"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	internallogger "github.com/juju/juju/internal/logger"
 	internalworker "github.com/juju/juju/internal/worker"
@@ -148,10 +149,20 @@ func (w *updaterWorker) loop() error {
 				continue
 			}
 
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-external-controllers-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "external-controller-updater"),
+				),
+			)
+
 			logger.Debugf(ctx, "external controllers changed: %q", ids)
 			tags := make([]names.ControllerTag, len(ids))
 			for i, id := range ids {
 				if !names.IsValidController(id) {
+					span.RecordError(err)
+					span.End()
 					return errors.Errorf("%q is not a valid controller tag", id)
 				}
 				tags[i] = names.NewControllerTag(id)
@@ -177,9 +188,12 @@ func (w *updaterWorker) loop() error {
 						w.noChanges,
 					)
 				}); err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Annotatef(err, "starting watcher for external controller %q", tag.Id())
 				}
 			}
+			span.End()
 		}
 	}
 }
@@ -298,8 +312,18 @@ func (w *controllerWatcher) loop() error {
 				return w.catacomb.ErrDying()
 			}
 
+			ctx, span := trace.Start(
+				nw.ChangeContext(ctx),
+				trace.Name("handle-controller-info-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "external-controller-updater"),
+				),
+			)
+
 			newInfo, err := client.ControllerInfo(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "getting external controller info")
 			}
 
@@ -309,6 +333,7 @@ func (w *controllerWatcher) loop() error {
 				if w.noChanges != nil {
 					w.noChanges()
 				}
+				span.End()
 				continue
 			}
 
@@ -322,6 +347,8 @@ func (w *controllerWatcher) loop() error {
 				Addrs:          newInfo.Addrs,
 				CACert:         info.CACert,
 			}); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotate(err, "caching external controller info")
 			}
 
@@ -333,17 +360,23 @@ func (w *controllerWatcher) loop() error {
 
 			if newAddrs.Contains(connectedIPAddr) {
 				logger.Debugf(ctx, "controller %q already connected to %q", w.tag.Id(), connectedIPAddr)
+				span.End()
 				continue
 			}
 
 			if err := worker.Stop(nw); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			if err := client.Close(); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			client = nil
 			nw = nil
+			span.End()
 		}
 	}
 }

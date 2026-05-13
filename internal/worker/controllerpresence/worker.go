@@ -18,6 +18,7 @@ import (
 	coreerrors "github.com/juju/juju/core/errors"
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/machine"
+	"github.com/juju/juju/core/trace"
 	coreunit "github.com/juju/juju/core/unit"
 	"github.com/juju/juju/environs/bootstrap"
 	"github.com/juju/juju/internal/errors"
@@ -154,10 +155,19 @@ func (w *controllerWorker) loop() error {
 			return w.catacomb.ErrDying()
 
 		case <-subscriber.Changes():
+			ctx, span := trace.Start(
+				ctx,
+				trace.Name("handle-connection-tracker-changes"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "controller-presence"),
+				),
+			)
 			// Remove all existing tracking runner workers.
 			for _, name := range w.runner.WorkerNames() {
 				if err := w.runner.StopAndRemoveWorker(name, w.catacomb.Dying()); err != nil && !errors.Is(err, coreerrors.NotFound) {
 					w.cfg.Logger.Debugf(ctx, "stopping connection tracker worker %q: %v", name, err)
+					span.RecordError(err)
+					span.End()
 					return errors.Capture(err)
 				}
 			}
@@ -165,8 +175,11 @@ func (w *controllerWorker) loop() error {
 			// Ensure we have connection trackers for all API remotes.
 			if err := w.ensureConnectionTrackers(ctx); err != nil {
 				w.cfg.Logger.Debugf(ctx, "ensuring connection trackers: %v", err)
+				span.RecordError(err)
+				span.End()
 				return errors.Capture(err)
 			}
+			span.End()
 		}
 	}
 }

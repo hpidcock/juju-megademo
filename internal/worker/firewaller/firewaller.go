@@ -28,6 +28,7 @@ import (
 	"github.com/juju/juju/core/network"
 	"github.com/juju/juju/core/network/firewall"
 	"github.com/juju/juju/core/relation"
+	"github.com/juju/juju/core/trace"
 	coreunit "github.com/juju/juju/core/unit"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/domain/application"
@@ -352,8 +353,17 @@ func (fw *Firewaller) loop() error {
 			if !ok {
 				return errors.New("machines watcher closed")
 			}
+			ctx, span := trace.Start(
+				fw.machinesWatcher.ChangeContext(ctx),
+				trace.Name("handle-machines-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
 			for _, machineName := range change {
 				if err := fw.machineLifeChanged(ctx, machine.Name(machineName)); err != nil {
+					span.RecordError(err)
+					span.End()
 					return err
 				}
 			}
@@ -366,6 +376,8 @@ func (fw *Firewaller) loop() error {
 					err = fw.reconcileInstances(ctx)
 				}
 				if err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Trace(err)
 				}
 			}
@@ -376,6 +388,7 @@ func (fw *Firewaller) loop() error {
 					ensureModelFirewalls = fw.clk.After(0)
 				}
 			}
+			span.End()
 		case change, ok := <-portsChange:
 			if !ok {
 				return errors.New("ports watcher closed")
@@ -394,7 +407,9 @@ func (fw *Firewaller) loop() error {
 				return errors.New("subnet watcher closed")
 			}
 
-			if err := fw.subnetsChanged(ctx); err != nil {
+			if err := fw.subnetsChanged(
+				fw.subnetWatcher.ChangeContext(ctx),
+			); err != nil {
 				return errors.Trace(err)
 			}
 		case change := <-fw.unitsChange:
@@ -416,20 +431,40 @@ func (fw *Firewaller) loop() error {
 			if !ok {
 				return errors.New("consumer relations watcher closed")
 			}
+			ctx, span := trace.Start(
+				fw.consumerRelationsWatcher.ChangeContext(ctx),
+				trace.Name("handle-consumer-relations-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
 			for _, relationUUID := range change {
 				if err := fw.consumerRelationLifeChanged(ctx, relation.UUID(relationUUID)); err != nil {
+					span.RecordError(err)
+					span.End()
 					return err
 				}
 			}
+			span.End()
 		case change, ok := <-fw.offererRelationsWatcher.Changes():
 			if !ok {
 				return errors.New("offerer relations watcher closed")
 			}
+			ctx, span := trace.Start(
+				fw.offererRelationsWatcher.ChangeContext(ctx),
+				trace.Name("handle-offerer-relations-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
 			for _, relationUUID := range change {
 				if err := fw.offererRelationLifeChanged(ctx, relation.UUID(relationUUID)); err != nil {
+					span.RecordError(err)
+					span.End()
 					return err
 				}
 			}
+			span.End()
 		case change := <-fw.localRelationsChange:
 			// We have a notification that the remote (consuming) model
 			// has changed egress networks so need to update the local
@@ -441,9 +476,13 @@ func (fw *Firewaller) loop() error {
 	}
 }
 
-func (fw *Firewaller) subnetsChanged(ctx context.Context) error {
+func (fw *Firewaller) subnetsChanged(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
 	// Refresh space topology
-	var err error
 	if fw.spaceInfos, err = fw.firewallerAPI.AllSpaceInfos(ctx); err != nil {
 		return errors.Trace(err)
 	}
@@ -559,16 +598,28 @@ func (fw *Firewaller) startMachine(ctx context.Context, machineName machine.Name
 		if !ok {
 			return errors.New("machine units watcher closed")
 		}
+		ctx, span := trace.Start(
+			unitw.ChangeContext(ctx),
+			trace.Name("handle-unit-change"),
+			trace.WithAttributes(
+				trace.StringAttr("worker", "firewaller"),
+			),
+		)
 		unitNames, err := transform.SliceOrErr(change, coreunit.NewName)
 		if err != nil {
+			span.RecordError(err)
+			span.End()
 			return err
 		}
 		fw.machineds[machineName] = machined
 		err = fw.unitsChanged(ctx, &unitsChange{machined: machined, units: unitNames})
 		if err != nil {
 			delete(fw.machineds, machineName)
+			span.RecordError(err)
+			span.End()
 			return errors.Annotatef(err, "responding to units changes for %q, %q", machineName, fw.modelUUID)
 		}
+		span.End()
 	}
 
 	err = catacomb.Invoke(catacomb.Plan{
@@ -1379,6 +1430,9 @@ func (md *machineData) machine(ctx context.Context) (Machine, error) {
 
 // watchLoop watches the machine for units added or removed.
 func (md *machineData) watchLoop(unitw watcher.StringsWatcher) error {
+	ctx, cancel := md.scopedContext()
+	defer cancel()
+
 	if err := md.catacomb.Add(unitw); err != nil {
 		return errors.Trace(err)
 	}
@@ -1390,15 +1444,27 @@ func (md *machineData) watchLoop(unitw watcher.StringsWatcher) error {
 			if !ok {
 				return errors.New("machine units watcher closed")
 			}
+			ctx, span := trace.Start(
+				unitw.ChangeContext(ctx),
+				trace.Name("handle-unit-add-remove-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
+			_ = ctx
 			unitNames, err := transform.SliceOrErr(change, coreunit.NewName)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return err
 			}
 			select {
 			case <-md.catacomb.Dying():
+				span.End()
 				return md.catacomb.ErrDying()
 			case md.fw.unitsChange <- &unitsChange{machined: md, units: unitNames}:
 			}
+			span.End()
 		}
 	}
 }
@@ -1411,6 +1477,10 @@ func (md *machineData) Kill() {
 // Wait is part of the worker.Worker interface.
 func (md *machineData) Wait() error {
 	return md.catacomb.Wait()
+}
+
+func (md *machineData) scopedContext() (context.Context, context.CancelFunc) {
+	return context.WithCancel(md.catacomb.Context(context.Background()))
 }
 
 // unitData holds unit details.
@@ -1462,25 +1532,39 @@ func (ad *applicationData) watchLoop(curExposed bool, curExposedEndpoints map[st
 			if !ok {
 				return errors.New("application watcher closed")
 			}
+			ctx, span := trace.Start(
+				appWatcher.ChangeContext(ctx),
+				trace.Name("handle-application-expose-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
 			newIsExposed, err := ad.applicationService.IsApplicationExposed(ctx, ad.applicationTag.Name)
 			if err != nil {
 				if errors.Is(err, errors.NotFound) {
 					ad.fw.logger.Debugf(ctx, "is exposed application %q, app not found: %w", ad.applicationTag.Name, err)
+					span.End()
 					return nil
 				}
+				span.RecordError(err)
+				span.End()
 				return internalerrors.Capture(err)
 			}
 			newExposedEndpoints, err := ad.applicationService.GetExposedEndpoints(ctx, ad.applicationTag.Name)
 			if err != nil {
 				if errors.Is(err, errors.NotFound) {
 					ad.fw.logger.Debugf(ctx, "expose info for application %q, app not found: %w", ad.applicationTag.Name, err)
+					span.End()
 					return nil
 				}
+				span.RecordError(err)
+				span.End()
 				return internalerrors.Capture(err)
 			}
 			if curExposed == newIsExposed && equalExposedEndpoints(curExposedEndpoints, newExposedEndpoints) {
 				ad.fw.logger.Tracef(ctx, "application %q expose settings unchanged: exposed: %v, exposedEndpoints: %v",
 					ad.applicationTag.Name, curExposed, curExposedEndpoints)
+				span.End()
 				continue
 			}
 			ad.fw.logger.Tracef(ctx, "application %q expose settings changed: exposed: %v, exposedEndpoints: %v",
@@ -1489,9 +1573,11 @@ func (ad *applicationData) watchLoop(curExposed bool, curExposedEndpoints map[st
 			curExposed, curExposedEndpoints = newIsExposed, newExposedEndpoints
 			select {
 			case <-ad.catacomb.Dying():
+				span.End()
 				return ad.catacomb.ErrDying()
 			case ad.fw.exposedChange <- &exposedChange{ad, newIsExposed, newExposedEndpoints}:
 			}
+			span.End()
 		}
 	}
 }
@@ -1844,8 +1930,17 @@ func (rd *remoteRelationData) watchLocalIngress() error {
 		case <-rd.catacomb.Dying():
 			return rd.catacomb.ErrDying()
 		case <-ingressAddressWatcher.Changes():
+			ctx, span := trace.Start(
+				ingressAddressWatcher.ChangeContext(ctx),
+				trace.Name("handle-ingress-address-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
 			cidrs, err := fw.crossModelRelationService.GetRelationNetworkIngress(ctx, rd.relationUUID)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			fw.logger.Tracef(ctx, "offerer relation ingress addresses for %v changed: %v", rd.tag, cidrs)
@@ -1858,9 +1953,11 @@ func (rd *remoteRelationData) watchLocalIngress() error {
 			}
 			select {
 			case <-rd.catacomb.Dying():
+				span.End()
 				return rd.catacomb.ErrDying()
 			case rd.fw.localRelationsChange <- change:
 			}
+			span.End()
 		}
 	}
 }
@@ -1903,10 +2000,21 @@ func (rd *remoteRelationData) watchLocalEgressPublishRemote() error {
 				return errors.New("local relation network egress watcher closed")
 			}
 
+			ctx, span := trace.Start(
+				egressAddressWatcher.ChangeContext(ctx),
+				trace.Name("handle-egress-address-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
+
 			rd.fw.logger.Debugf(ctx, "local egress addresses for %v changed: %v", rd.tag, cidrs)
 			if err := rd.publishIngressToRemote(ctx, cidrs); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
+			span.End()
 		}
 	}
 }
@@ -1963,10 +2071,20 @@ func (rd *remoteRelationData) watchRemoteEgressApplyLocal() error {
 		case <-rd.catacomb.Dying():
 			return rd.catacomb.ErrDying()
 		case cidrs := <-egressAddressWatcher.Changes():
+			ctx, span := trace.Start(
+				egressAddressWatcher.ChangeContext(ctx),
+				trace.Name("handle-remote-egress-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "firewaller"),
+				),
+			)
 			rd.fw.logger.Debugf(ctx, "remote egress addresses for %q changed: %v", rd.tag, cidrs)
 			if err := rd.updateIngressNetworks(ctx, cidrs); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
+			span.End()
 		}
 	}
 }

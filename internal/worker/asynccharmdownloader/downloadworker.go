@@ -16,6 +16,7 @@ import (
 	"github.com/juju/juju/core/application"
 	corehttp "github.com/juju/juju/core/http"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	domainapplication "github.com/juju/juju/domain/application"
 	"github.com/juju/juju/internal/errors"
@@ -189,6 +190,14 @@ func (w *Worker) loop() error {
 				continue
 			}
 
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-pending-charm-changes"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "async-charm-downloader"),
+				),
+			)
+
 			logger.Debugf(ctx, "triggering asynchronous download of charms for the following applications: %v", strings.Join(changes, ", "))
 
 			var downloader Downloader
@@ -205,6 +214,8 @@ func (w *Worker) loop() error {
 				}
 
 				if cached, err := w.workerFromCache(appID); err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Errorf("getting download worker from the cache %q: %v", appID, err)
 				} else if cached {
 					// Already tracking this application, skip it.
@@ -218,6 +229,8 @@ func (w *Worker) loop() error {
 					// connection to the charm store.
 					httpClient, err := w.config.NewHTTPClient(ctx, w.config.HTTPClientGetter)
 					if err != nil {
+						span.RecordError(err)
+						span.End()
 						return errors.Capture(err)
 					}
 					downloader = w.config.NewDownloader(httpClient, logger)
@@ -225,9 +238,12 @@ func (w *Worker) loop() error {
 
 				// Kick off the async download worker for the application.
 				if err := w.initAsyncDownloadWorker(ctx, appID, downloader); err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Capture(err)
 				}
 			}
+			span.End()
 		}
 	}
 }

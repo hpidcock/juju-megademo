@@ -11,6 +11,7 @@ import (
 	"github.com/juju/worker/v5/catacomb"
 
 	"github.com/juju/juju/core/migration"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -123,7 +124,16 @@ func (w *Worker) loop() error {
 		case <-w.catacomb.Dying():
 			return w.catacomb.ErrDying()
 		case <-watcher.Changes():
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("check-migration-phase"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "migration-flag"),
+				),
+			)
 			phase, err := facade.Phase(ctx, model)
+			span.RecordError(err)
+			span.End()
 			if err != nil {
 				return errors.Trace(err)
 			}

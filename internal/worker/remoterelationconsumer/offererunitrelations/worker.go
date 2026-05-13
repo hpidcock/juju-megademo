@@ -19,6 +19,7 @@ import (
 	corelife "github.com/juju/juju/core/life"
 	"github.com/juju/juju/core/logger"
 	corerelation "github.com/juju/juju/core/relation"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/rpc/params"
 )
 
@@ -243,6 +244,14 @@ func (w *remoteWorker) loop() error {
 				continue
 			}
 
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-relation-units-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "offerer-unit-relations"),
+				),
+			)
+
 			w.logger.Debugf(ctx, "remote relation units changed for %v: %v", w.consumerRelationUUID, change)
 
 			appSettings := make(map[string]string)
@@ -286,6 +295,7 @@ func (w *remoteWorker) loop() error {
 			}
 
 			// Send in lockstep so we don't drop events.
+			span.End()
 			select {
 			case <-w.catacomb.Dying():
 				return w.catacomb.ErrDying()

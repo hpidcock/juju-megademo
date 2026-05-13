@@ -18,6 +18,7 @@ import (
 	api "github.com/juju/juju/api/controller/caasmodelconfigmanager"
 	"github.com/juju/juju/controller"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/internal/docker"
 	"github.com/juju/juju/internal/docker/registry"
@@ -158,21 +159,34 @@ func (w *manager) loop() (err error) {
 		case <-w.catacomb.Dying():
 			return w.catacomb.ErrDying()
 		case <-watcher.Changes():
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("handle-controller-config-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "caas-model-config-manager"),
+				),
+			)
 			controllerConfig, err := w.config.Facade.ControllerConfig(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			repoDetails, err := docker.NewImageRepoDetails(controllerConfig.CAASImageRepo())
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Annotatef(err, "parsing %s", controller.CAASImageRepo)
 			}
 			if reflect.DeepEqual(repoDetails, lastRepoDetails) {
+				span.End()
 				continue
 			}
 			lastRepoDetails = repoDetails
 			if !repoDetails.IsPrivate() {
 				timeout = nil
 				refresh = nil
+				span.End()
 				continue
 			}
 			if reg != nil {
@@ -180,13 +194,18 @@ func (w *manager) loop() (err error) {
 			}
 			reg, err = w.registryFunc(repoDetails)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			if err = reg.Ping(); err != nil {
+				span.RecordError(err)
+				span.End()
 				return errors.Trace(err)
 			}
 			first = true
 			refresh = signal
+			span.End()
 		case <-timeout:
 			timeout = nil
 			if refresh == nil {

@@ -29,6 +29,7 @@ import (
 	"github.com/juju/juju/core/network"
 	coreresource "github.com/juju/juju/core/resource"
 	"github.com/juju/juju/core/status"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/unit"
 	"github.com/juju/juju/core/watcher"
 	applicationcharm "github.com/juju/juju/domain/application/charm"
@@ -277,9 +278,18 @@ func (p *provisioner) loop() error {
 			if !ok {
 				return errors.New("app watcher closed channel")
 			}
+			ctx, span := trace.Start(
+				appWatcher.ChangeContext(ctx),
+				trace.Name("handle-applications-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "caas-application-provisioner"),
+				),
+			)
 			for _, id := range apps {
 				appID, err := coreapplication.ParseUUID(id)
 				if err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Trace(err)
 				}
 
@@ -290,6 +300,8 @@ func (p *provisioner) loop() error {
 					// Runner is dying so we need to stop processing.
 					break
 				} else if err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Trace(err)
 				}
 
@@ -315,9 +327,12 @@ func (p *provisioner) loop() error {
 				p.logger.Debugf(ctx, "starting app worker %q", appID)
 				err = p.runner.StartWorker(ctx, id, startFunc)
 				if err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Trace(err)
 				}
 			}
+			span.End()
 		}
 	}
 }

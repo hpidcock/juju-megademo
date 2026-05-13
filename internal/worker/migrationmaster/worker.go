@@ -23,6 +23,7 @@ import (
 	coremigration "github.com/juju/juju/core/migration"
 	"github.com/juju/juju/core/resource"
 	"github.com/juju/juju/core/semversion"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/domain/application/charm"
 	internallogger "github.com/juju/juju/internal/logger"
@@ -732,6 +733,14 @@ func (w *Worker) waitForActiveMigration(ctx context.Context) (coremigration.Migr
 		case <-watcher.Changes():
 		}
 
+		ctx, span := trace.Start(
+			watcher.ChangeContext(ctx),
+			trace.Name("check-migration-status"),
+			trace.WithAttributes(
+				trace.StringAttr("worker", "migration-master"),
+			),
+		)
+
 		status, err := w.config.Facade.MigrationStatus(ctx)
 		switch {
 		case params.IsCodeNotFound(err):
@@ -739,19 +748,26 @@ func (w *Worker) waitForActiveMigration(ctx context.Context) (coremigration.Migr
 		case err == nil && status.Phase.IsTerminal():
 			// No migration in progress.
 			if modelHasMigrated(status.Phase) {
+				span.End()
 				return empty, ErrMigrated
 			}
 		case err != nil:
+			span.RecordError(err)
+			span.End()
 			return empty, errors.Annotate(err, "retrieving migration status")
 		default:
 			// Migration is in progress.
+			span.End()
 			return status, nil
 		}
 
 		// While waiting for a migration, ensure the fortress is open.
 		if err := w.config.Guard.Unlock(ctx); err != nil {
+			span.RecordError(err)
+			span.End()
 			return empty, errors.Trace(err)
 		}
+		span.End()
 	}
 }
 
@@ -794,12 +810,23 @@ func (w *Worker) waitForMinions(
 			return false, nil
 
 		case <-watch.Changes():
+			ctx, span := trace.Start(
+				watch.ChangeContext(ctx),
+				trace.Name("check-minion-reports"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "migration-master"),
+				),
+			)
 			var err error
 			reports, err = w.config.Facade.MinionReports(ctx)
 			if err != nil {
+				span.RecordError(err)
+				span.End()
 				return false, errors.Trace(err)
 			}
 			if err := validateMinionReports(reports, status); err != nil {
+				span.RecordError(err)
+				span.End()
 				return false, errors.Trace(err)
 			}
 			w.logger.Debugf(ctx, "migration minion reports:\n%s", pretty.Sprint(reports))
@@ -808,6 +835,7 @@ func (w *Worker) waitForMinions(
 				w.logger.Errorf(ctx, formatMinionFailure(reports, infoPrefix))
 				w.setErrorStatus(ctx, "%s, some agents reported failure", infoPrefix)
 				if waitPolicy == failFast {
+					span.End()
 					return false, nil
 				}
 			}
@@ -816,12 +844,15 @@ func (w *Worker) waitForMinions(
 				if failures > 0 {
 					w.logger.Errorf(ctx, msg)
 					w.setErrorStatus(ctx, "%s, some agents reported failure", infoPrefix)
+					span.End()
 					return false, nil
 				}
 				w.logger.Infof(ctx, msg)
 				w.setInfoStatus(ctx, "%s, all agents reported success", infoPrefix)
+				span.End()
 				return true, nil
 			}
+			span.End()
 
 		case <-logProgress:
 			w.setInfoStatus(ctx, "%s, %s", infoPrefix, formatMinionWaitUpdate(reports))

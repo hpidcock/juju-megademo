@@ -22,6 +22,7 @@ import (
 	"github.com/juju/juju/core/logger"
 	coreos "github.com/juju/juju/core/os"
 	"github.com/juju/juju/core/semversion"
+	"github.com/juju/juju/core/trace"
 	jujuversion "github.com/juju/juju/core/version"
 	"github.com/juju/juju/core/watcher"
 	jujuhttp "github.com/juju/juju/internal/http"
@@ -165,6 +166,14 @@ func (u *Upgrader) loop() error {
 			if !ok {
 				return errors.New("version watcher closed")
 			}
+			_, span := trace.Start(
+				versionWatcher.ChangeContext(ctx),
+				trace.Name("handle-version-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "upgrader"),
+				),
+			)
+			span.End()
 		}
 
 		wantVersion, err := u.client.DesiredVersion(ctx, u.tag.String())

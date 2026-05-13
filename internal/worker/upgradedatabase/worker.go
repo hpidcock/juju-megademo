@@ -21,6 +21,7 @@ import (
 	"github.com/juju/juju/core/logger"
 	coremodel "github.com/juju/juju/core/model"
 	"github.com/juju/juju/core/semversion"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/upgrade"
 	jujuversion "github.com/juju/juju/core/version"
 	"github.com/juju/juju/core/watcher"
@@ -331,17 +332,28 @@ func (w *upgradeDBWorker) watchUpgrade(ctx context.Context) error {
 			return w.catacomb.ErrDying()
 
 		case <-completedWatcher.Changes():
-			// The upgrade is complete, so we can unlock the lock.
+			ctx, span := trace.Start(
+				completedWatcher.ChangeContext(ctx),
+				trace.Name("upgrade-database-completed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "upgrade-database"),
+				),
+			)
 			w.logger.Infof(ctx, "database upgrade completed")
 			w.dbUpgradeCompleteLock.Unlock()
+			span.End()
 			return dependency.ErrUninstall
 
 		case <-failedWatcher.Changes():
-			// If the upgrade failed, we can't do anything about it, we'll make
-			// a note about the failure to upgrade. We'll return
-			// dependency.ErrBounce, this will allow the workers to restart
-			// and try again.
+			ctx, span := trace.Start(
+				failedWatcher.ChangeContext(ctx),
+				trace.Name("upgrade-database-failed"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "upgrade-database"),
+				),
+			)
 			w.logger.Errorf(ctx, "database upgrade failed, check logs for details")
+			span.End()
 			return dependency.ErrBounce
 		}
 	}
@@ -406,6 +418,13 @@ func (w *upgradeDBWorker) runUpgrade(ctx context.Context, upgradeUUID domainupgr
 			return w.abort(ctx, upgradeUUID, errors.New("upgrade timed out"))
 
 		case <-watcher.Changes():
+			ctx, span := trace.Start(
+				watcher.ChangeContext(ctx),
+				trace.Name("perform-database-upgrade"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "upgrade-database"),
+				),
+			)
 			w.logger.Infof(ctx, "database upgrade starting")
 
 			// Any errors within this block will need to set the upgrade as
@@ -416,6 +435,8 @@ func (w *upgradeDBWorker) runUpgrade(ctx context.Context, upgradeUUID domainupgr
 			// also in the watching state. No forward progress will be made.
 
 			err := w.performUpgrade(ctx, upgradeUUID)
+			span.RecordError(err)
+			span.End()
 			if err == nil {
 				w.logger.Infof(ctx, "database upgrade completed")
 				w.dbUpgradeCompleteLock.Unlock()

@@ -25,6 +25,7 @@ import (
 	"github.com/juju/juju/core/model"
 	corerelation "github.com/juju/juju/core/relation"
 	"github.com/juju/juju/core/status"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/unit"
 	"github.com/juju/juju/core/watcher"
 	applicationerrors "github.com/juju/juju/domain/application/errors"
@@ -336,6 +337,15 @@ func (w *localConsumerWorker) loop() (err error) {
 					return errors.New("relations watcher closed unexpectedly")
 				}
 			}
+
+			ctx, span := trace.Start(
+				relationsWatcher.ChangeContext(ctx),
+				trace.Name("handle-relations-change"),
+				trace.WithAttributes(
+					trace.StringAttr("worker", "local-consumer"),
+				),
+			)
+
 			w.logger.Debugf(ctx, "relations changed: %v", changes)
 
 			for _, change := range changes {
@@ -356,10 +366,8 @@ func (w *localConsumerWorker) loop() (err error) {
 					// Ensure that we don't have any workers still running for
 					// the removed relation.
 					if err := w.handleRelationNotFound(ctx, relationUUID); err != nil {
-						// If we fail to remove the relation, we must kill the
-						// worker, as nothing will come around and try again.
-						// Thus, kill it and force the application worker to
-						// restart and start afresh.
+						span.RecordError(err)
+						span.End()
 						return errors.Annotatef(err, "cleaning up removed relation %q", relationUUID)
 					}
 
@@ -367,14 +375,19 @@ func (w *localConsumerWorker) loop() (err error) {
 					continue
 
 				} else if err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Annotate(err, "querying relations")
 				}
 
 				// The relation changed, we need to process the changed details.
 				if err := w.handleConsumerRelationChange(ctx, details); err != nil {
+					span.RecordError(err)
+					span.End()
 					return errors.Annotatef(err, "handling change for relation %q", relationUUID)
 				}
 			}
+			span.End()
 
 		case change := <-w.consumerRelationUnitChanges:
 			w.logger.Debugf(ctx, "consumer relation units changed: %v", change)

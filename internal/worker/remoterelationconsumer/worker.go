@@ -20,6 +20,7 @@ import (
 	corerelation "github.com/juju/juju/core/relation"
 	"github.com/juju/juju/core/secrets"
 	"github.com/juju/juju/core/status"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/unit"
 	"github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/domain/crossmodelrelation"
@@ -354,7 +355,9 @@ func (w *Worker) loop() (err error) {
 			return w.catacomb.ErrDying()
 
 		case <-modelWatcher.Changes():
-			if err := w.handleModelDying(ctx); err != nil {
+			if err := w.handleModelDying(
+				modelWatcher.ChangeContext(ctx),
+			); err != nil {
 				return errors.Trace(err)
 			}
 
@@ -363,14 +366,22 @@ func (w *Worker) loop() (err error) {
 				return errors.New("change channel closed")
 			}
 
-			if err := w.handleApplicationChanges(ctx); err != nil {
+			if err := w.handleApplicationChanges(
+				offersWatcher.ChangeContext(ctx),
+			); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (w *Worker) handleApplicationChanges(ctx context.Context) error {
+func (w *Worker) handleApplicationChanges(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
+
 	w.logger.Debugf(ctx, "processing offerer application worker changes")
 
 	// Fetch the current state of each of the offerer application workers that
@@ -462,7 +473,13 @@ func (w *Worker) hasRemoteAppChanged(remoteApp crossmodelrelation.RemoteApplicat
 	return appWorker.ConsumeVersion() != 0, nil
 }
 
-func (w *Worker) handleModelDying(ctx context.Context) error {
+func (w *Worker) handleModelDying(ctx context.Context) (err error) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
+
 	w.logger.Debugf(ctx, "model is dying, stopping all offerer application workers")
 
 	for _, appUUID := range w.runner.WorkerNames() {

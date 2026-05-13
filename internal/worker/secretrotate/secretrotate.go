@@ -16,6 +16,7 @@ import (
 
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/core/secrets"
+	"github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 )
 
@@ -126,7 +127,9 @@ func (w *Worker) loop() (err error) {
 			if !ok {
 				return errors.New("secret rotation change channel closed")
 			}
-			w.handleSecretRotateChanges(ctx, ch)
+			w.handleSecretRotateChanges(
+				changes.ChangeContext(ctx), ch,
+			)
 		case now := <-timeToRotate:
 			w.rotate(ctx, now)
 		}
@@ -161,6 +164,8 @@ func (w *Worker) rotate(ctx context.Context, now time.Time) {
 }
 
 func (w *Worker) handleSecretRotateChanges(ctx context.Context, changes []watcher.SecretTriggerChange) {
+	ctx, span := trace.Start(ctx, trace.NameFromFunc())
+	defer span.End()
 	w.config.Logger.Debugf(ctx, "got rotate secret changes: %#v", changes)
 	if len(changes) == 0 {
 		return
