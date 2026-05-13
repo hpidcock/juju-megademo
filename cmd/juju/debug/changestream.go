@@ -79,11 +79,17 @@ func generateMockTransactions(baseID int64) []transactionEntry {
 		txns[i] = transactionEntry{
 			TxnID:      txnID,
 			EventCount: rand.IntN(5) + 1,
-			TraceID:    randomHex(12),
-			SpanID:     randomHex(12),
+			TraceID:    randomMockTraceID(),
+			SpanID:     randomHex(8),
 		}
 	}
 	return txns
+}
+
+var mockTraceIDs = []string{
+	"f0250316350d16f308b71ab93cbf7510",
+	"c23d861742e1815509564a7d176d3590",
+	"6aa4a72c364edbd109cbf40d3520c1ae",
 }
 
 func randomHex(n int) string {
@@ -93,6 +99,13 @@ func randomHex(n int) string {
 		b[i] = hexChars[rand.IntN(len(hexChars))]
 	}
 	return string(b)
+}
+
+func randomMockTraceID() string {
+	if len(mockTraceIDs) > 0 {
+		return mockTraceIDs[rand.IntN(len(mockTraceIDs))]
+	}
+	return randomHex(12)
 }
 
 func (m changestreamModel) Init() tea.Cmd {

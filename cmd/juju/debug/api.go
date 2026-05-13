@@ -8,8 +8,50 @@ import (
 
 	"github.com/juju/juju/api"
 	"github.com/juju/juju/api/client/modelmanager"
+	apicontroller "github.com/juju/juju/api/controller/controller"
 	"github.com/juju/juju/api/common"
+	"github.com/juju/juju/controller"
 )
+
+type TempoAPI interface {
+	FetchTrace(ctx context.Context, traceID string) (*TraceData, error)
+	IsConfigured() bool
+}
+
+type TraceData struct {
+	TraceID string
+	Spans   []SpanEntry
+}
+
+type SpanEntry struct {
+	SpanID      string
+	Operation   string
+	Service     string
+	Duration    string
+	ParentID    string
+	startNano   int64
+}
+
+type ControllerConfigAPI interface {
+	ControllerConfig(ctx context.Context) (controller.Config, error)
+	Close() error
+}
+
+type controllerConfigAPIClient struct {
+	client *apicontroller.Client
+}
+
+func newControllerConfigAPIClient(client *apicontroller.Client) *controllerConfigAPIClient {
+	return &controllerConfigAPIClient{client: client}
+}
+
+func (c *controllerConfigAPIClient) ControllerConfig(ctx context.Context) (controller.Config, error) {
+	return c.client.ControllerConfig(ctx)
+}
+
+func (c *controllerConfigAPIClient) Close() error {
+	return c.client.Close()
+}
 
 type StreamStatus struct {
 	Name  string

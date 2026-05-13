@@ -44,3 +44,9 @@ type logStreamReadyMsg struct {
 type logStreamDoneMsg struct {
 	version int
 }
+
+type fetchTraceResultMsg struct {
+	traceID string
+	data    *TraceData
+	err     error
+}

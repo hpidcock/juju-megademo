@@ -1,3 +1,6 @@
+// Copyright 2025 Canonical Ltd.
+// Licensed under the AGPLv3, see LICENCE file for details.
+
 // Package debug implements the `juju debug` TUI command -- an interactive
 // terminal UI for inspecting and controlling the Juju changestream.
 //

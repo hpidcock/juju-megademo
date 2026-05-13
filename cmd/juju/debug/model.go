@@ -46,6 +46,7 @@ func newDebugModel(
 	debugAPI DebugChangeStreamAPI,
 	modelLister ModelListAPI,
 	switchModelFunc func(modelName string) error,
+	tempoAPI TempoAPI,
 ) debugModel {
 	return debugModel{
 		controllerName:  controllerName,
@@ -54,7 +55,7 @@ func newDebugModel(
 		activePane:      changestreamPane,
 		changestream:    newChangestreamModel(debugAPI, modelLister, modelName, modelUUID),
 		log:             newLogModel(logAPI),
-		trace:           newTraceModel(),
+		trace:           newTraceModel(tempoAPI),
 		help:            newHelpModel(),
 		debugAPI:        debugAPI,
 		modelLister:     modelLister,
@@ -143,11 +144,11 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		contextBarHeight := 1
 		remainingHeight := m.height - contextBarHeight
 		m.changestream.width = msg.Width
-		m.changestream.height = paneHeight(remainingHeight, 0.40)
+		m.changestream.height = min(paneHeight(remainingHeight, 0.40), 12)
 		m.log.width = msg.Width
 		m.log.height = paneHeight(remainingHeight, 0.35)
 		m.trace.width = msg.Width
-		m.trace.height = paneHeight(remainingHeight, 0.25)
+		m.trace.height = remainingHeight - min(paneHeight(remainingHeight, 0.40), 12) - paneHeight(remainingHeight, 0.35)
 		m.help.width = msg.Width
 		m.help.height = m.height
 	}
@@ -167,7 +168,14 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if selectMsg, ok := msg.(selectTxnMsg); ok {
 		ms := m.changestream.currentModelState()
 		if ms != nil && selectMsg.txnIndex >= 0 && selectMsg.txnIndex < len(ms.Transactions) {
-			m.trace.setTransaction(ms.Transactions[selectMsg.txnIndex])
+			txn := ms.Transactions[selectMsg.txnIndex]
+			m.trace.setTransaction(txn)
+			var cmds []tea.Cmd
+			if m.trace.spinning && m.trace.fetching != "" {
+				cmds = append(cmds, m.trace.Init())
+				cmds = append(cmds, fetchTraceCmd(m.trace.tempoAPI, m.trace.fetching))
+			}
+			return m, tea.Batch(cmds...)
 		}
 	}
 
@@ -176,7 +184,7 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modelUUID = switchMsg.modelUUID
 		m.changestream.currentModel = switchMsg.modelUUID
 		m.changestream.cursor = 0
-		m.trace = newTraceModel()
+		m.trace = newTraceModel(m.trace.tempoAPI)
 		if m.switchModelFunc != nil {
 			_ = m.switchModelFunc(switchMsg.modelName)
 		}

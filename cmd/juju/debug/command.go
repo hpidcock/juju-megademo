@@ -11,6 +11,7 @@ import (
 	"github.com/juju/gnuflag"
 	"github.com/mattn/go-isatty"
 
+	apicontroller "github.com/juju/juju/api/controller/controller"
 	jujucmd "github.com/juju/juju/cmd"
 	"github.com/juju/juju/cmd/cmd"
 	"github.com/juju/juju/cmd/modelcmd"
@@ -96,6 +97,20 @@ func (c *debugCommand) Run(ctx *cmd.Context) error {
 		return fmt.Errorf("creating model manager client: %w", err)
 	}
 
+	controllerClient := apicontroller.NewClient(apiRoot)
+	defer controllerClient.Close()
+
+	controllerConfig, err := controllerClient.ControllerConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("getting controller config: %w", err)
+	}
+
+	var tempoAPI TempoAPI
+	endpoint := controllerConfig.OpenTelemetryEndpoint()
+	if endpoint != "" {
+		tempoAPI = NewTempoClient(endpoint)
+	}
+
 	debugAPI := newMockDebugChangeStreamAPI()
 	modelLister := newModelListAPIClient(modelManagerClient, accountDetails.User)
 	defer modelManagerClient.Close()
@@ -106,7 +121,7 @@ func (c *debugCommand) Run(ctx *cmd.Context) error {
 		return qualifyingStore.SetCurrentModel(controllerName, modelName)
 	}
 
-	model := newDebugModel(controllerName, modelName, modelUUID, logAPI, debugAPI, modelLister, switchModel)
+	model := newDebugModel(controllerName, modelName, modelUUID, logAPI, debugAPI, modelLister, switchModel, tempoAPI)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI exited with error: %w", err)
