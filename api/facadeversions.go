@@ -51,6 +51,7 @@ var facadeVersions = facades.FacadeVersions{
 	"CrossController":              {1},
 	"CrossModelRelations":          {3},
 	"CrossModelSecrets":            {1, 2},
+	"DebugChangeStream":            {1},
 	"Deployer":                     {1},
 	"DiskManager":                  {2, 3},
 	"EntityWatcher":                {2},
