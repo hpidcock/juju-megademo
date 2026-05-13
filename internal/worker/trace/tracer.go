@@ -252,6 +252,27 @@ func (s *managedSpan) End(attrs ...coretrace.Attribute) {
 	s.span.End(trace.WithStackTrace(s.stackTracesEnabled))
 }
 
+// AddLink records a causal link from this span to the span identified
+// by traceID and spanID. Both must be valid W3C hex-encoded IDs.
+// Errors parsing the IDs are silently ignored.
+func (s *managedSpan) AddLink(traceID, spanID string) {
+	tid, err := trace.TraceIDFromHex(traceID)
+	if err != nil {
+		return
+	}
+	sid, err := trace.SpanIDFromHex(spanID)
+	if err != nil {
+		return
+	}
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    tid,
+		SpanID:     sid,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	s.span.AddLink(trace.Link{SpanContext: sc})
+}
+
 type managedScope struct {
 	span ClientSpan
 }

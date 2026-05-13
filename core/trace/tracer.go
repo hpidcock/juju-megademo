@@ -115,6 +115,14 @@ type Span interface {
 	// is called. Therefore, updates to the Span are not allowed after this
 	// method has been called.
 	End(...Attribute)
+
+	// AddLink records a causal link from this span to another trace.
+	// This is used when a coalesced batch of changes originates from
+	// multiple transactions with different trace IDs; the fresh batch
+	// span links back to each originating trace.
+	// traceID must be a W3C-format trace ID (32 lower-case hex chars).
+	// spanID must be a W3C-format span ID (16 lower-case hex chars).
+	AddLink(traceID, spanID string)
 }
 
 // Scope is the scope of the span.

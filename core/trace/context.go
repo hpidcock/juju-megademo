@@ -174,6 +174,9 @@ func (NoopSpan) RecordError(error, ...Attribute) {}
 // method has been called.
 func (NoopSpan) End(...Attribute) {}
 
+// AddLink is a no-op implementation of Span.AddLink.
+func (NoopSpan) AddLink(string, string) {}
+
 // NoopScope is a scope that does nothing.
 type NoopScope struct{}
 

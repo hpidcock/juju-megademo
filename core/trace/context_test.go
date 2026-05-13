@@ -79,3 +79,5 @@ func (stubSpan) RecordError(error, ...Attribute) {}
 // is called. Therefore, updates to the Span are not allowed after this
 // method has been called.
 func (stubSpan) End(...Attribute) {}
+
+func (stubSpan) AddLink(string, string) {}

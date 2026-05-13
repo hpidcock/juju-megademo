@@ -90,6 +90,9 @@ type ClientSpan interface {
 	// TracerProvider returns a TracerProvider that can be used to generate
 	// additional Spans on the same telemetry pipeline as the current Span.
 	TracerProvider() trace.TracerProvider
+
+	// AddLink adds a link to the span.
+	AddLink(link trace.Link)
 }
 
 // Tracer is the creator of Spans.
