@@ -18,36 +18,46 @@ import (
 
 const protocolVersion = "v1"
 
+// DqliteDatabase describes one selectable database.
 type DqliteDatabase struct {
-	Name      string `json:"name"`
-	UUID      string `json:"uuid"`
+	// Name is "controller" or the model name.
+	Name string `json:"name"`
+	// UUID is empty for the controller and set for model databases.
+	UUID string `json:"uuid"`
+	// Namespace is the database namespace used internally.
 	Namespace string `json:"namespace"`
-	Type      string `json:"type"`
+	// Type is "controller" or "model".
+	Type string `json:"type"`
 }
 
+// DqliteObject describes a table, view, or trigger.
 type DqliteObject struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
 }
 
+// DqliteNode describes a Dqlite cluster node.
 type DqliteNode struct {
 	ID      string `json:"id"`
 	Address string `json:"address"`
 	Role    string `json:"role"`
 }
 
+// DqliteQueryResult holds the result of a read-only query.
 type DqliteQueryResult struct {
-	Columns   []string   `json:"columns"`
+	Columns   []string `json:"columns"`
 	Rows      [][]string `json:"rows"`
 	RowCount  int        `json:"row_count"`
 	Truncated bool       `json:"truncated"`
 }
 
+// dqliteDDLResult holds the DDL response from the server.
 type dqliteDDLResult struct {
 	Name string `json:"name"`
 	SQL  string `json:"sql"`
 }
 
+// dqliteRequest is the JSON structure sent to the /dqlite websocket.
 type dqliteRequest struct {
 	Version   string `json:"version"`
 	RequestID string `json:"request_id"`
@@ -59,6 +69,7 @@ type dqliteRequest struct {
 	Limit     int    `json:"limit,omitempty"`
 }
 
+// dqliteResponse is the JSON structure received from the /dqlite websocket.
 type dqliteResponse struct {
 	Version   string          `json:"version"`
 	RequestID string          `json:"request_id"`
@@ -67,11 +78,15 @@ type dqliteResponse struct {
 	Result    json.RawMessage `json:"result,omitempty"`
 }
 
+// DqliteClient provides typed access to the /dqlite websocket.
 type DqliteClient struct {
 	conn base.Stream
 	mu   sync.Mutex
 }
 
+// OpenDqlite dials the /dqlite websocket, performs a version handshake,
+// and returns a client. The caller must already be logged in to the
+// controller API. The caller is responsible for calling Close when done.
 func OpenDqlite(ctx context.Context, src base.ControllerStreamConnector) (*DqliteClient, error) {
 	stream, err := src.ConnectControllerStream(ctx, "/dqlite", nil, nil)
 	if err != nil {
@@ -85,6 +100,7 @@ func OpenDqlite(ctx context.Context, src base.ControllerStreamConnector) (*Dqlit
 	return client, nil
 }
 
+// Close closes the underlying websocket stream.
 func (c *DqliteClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -92,6 +108,11 @@ func (c *DqliteClient) Close() error {
 }
 
 func newRequestID() string {
+	return NewRequestID()
+}
+
+// NewRequestID generates a random 8-character hex request identifier.
+func NewRequestID() string {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("%08x", binary.BigEndian.Uint32(b[:]))
@@ -121,6 +142,9 @@ func (c *DqliteClient) handshake(ctx context.Context) error {
 }
 
 func (c *DqliteClient) send(ctx context.Context, req dqliteRequest) (dqliteResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return dqliteResponse{}, fmt.Errorf("context error: %w", err)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -135,6 +159,21 @@ func (c *DqliteClient) send(ctx context.Context, req dqliteRequest) (dqliteRespo
 	return resp, nil
 }
 
+// validateResponse checks the server response for protocol errors.
+func (c *DqliteClient) validateResponse(resp dqliteResponse, expectType string) error {
+	if resp.Error != "" {
+		return errors.New(resp.Error)
+	}
+	if resp.Version != protocolVersion {
+		return fmt.Errorf("unsupported server version: %q", resp.Version)
+	}
+	if resp.Type != expectType {
+		return fmt.Errorf("unexpected response type: %q (expected %q)", resp.Type, expectType)
+	}
+	return nil
+}
+
+// Databases returns the controller database and all model databases.
 func (c *DqliteClient) Databases(ctx context.Context) ([]DqliteDatabase, error) {
 	req := dqliteRequest{
 		Version:   protocolVersion,
@@ -145,11 +184,8 @@ func (c *DqliteClient) Databases(ctx context.Context) ([]DqliteDatabase, error) 
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	if resp.Error != "" {
-		return nil, errors.New(resp.Error)
-	}
-	if resp.Version != protocolVersion {
-		return nil, errors.Errorf("unsupported server version: %q", resp.Version)
+	if err := c.validateResponse(resp, "databases"); err != nil {
+		return nil, err
 	}
 	var databases []DqliteDatabase
 	if err := json.Unmarshal(resp.Result, &databases); err != nil {
@@ -158,6 +194,8 @@ func (c *DqliteClient) Databases(ctx context.Context) ([]DqliteDatabase, error) 
 	return databases, nil
 }
 
+// Objects returns tables, views, or triggers in the given namespace.
+// kind is "table", "view", or "trigger".
 func (c *DqliteClient) Objects(ctx context.Context, ns string, kind string) ([]DqliteObject, error) {
 	req := dqliteRequest{
 		Version:   protocolVersion,
@@ -170,11 +208,8 @@ func (c *DqliteClient) Objects(ctx context.Context, ns string, kind string) ([]D
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	if resp.Error != "" {
-		return nil, errors.New(resp.Error)
-	}
-	if resp.Version != protocolVersion {
-		return nil, errors.Errorf("unsupported server version: %q", resp.Version)
+	if err := c.validateResponse(resp, "objects"); err != nil {
+		return nil, err
 	}
 	var objects []DqliteObject
 	if err := json.Unmarshal(resp.Result, &objects); err != nil {
@@ -183,6 +218,7 @@ func (c *DqliteClient) Objects(ctx context.Context, ns string, kind string) ([]D
 	return objects, nil
 }
 
+// DDL returns the CREATE statement for a table, view, or trigger.
 func (c *DqliteClient) DDL(ctx context.Context, ns string, name string) (string, error) {
 	req := dqliteRequest{
 		Version:   protocolVersion,
@@ -195,11 +231,8 @@ func (c *DqliteClient) DDL(ctx context.Context, ns string, name string) (string,
 	if err != nil {
 		return "", errors.Trace(err)
 	}
-	if resp.Error != "" {
-		return "", errors.New(resp.Error)
-	}
-	if resp.Version != protocolVersion {
-		return "", errors.Errorf("unsupported server version: %q", resp.Version)
+	if err := c.validateResponse(resp, "ddl"); err != nil {
+		return "", err
 	}
 	var result dqliteDDLResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
@@ -208,6 +241,8 @@ func (c *DqliteClient) DDL(ctx context.Context, ns string, name string) (string,
 	return result.SQL, nil
 }
 
+// Query executes a bounded read-only query and returns formatted results.
+// limit is clamped by the server to a maximum of 1000.
 func (c *DqliteClient) Query(ctx context.Context, ns string, sql string, limit int) (*DqliteQueryResult, error) {
 	req := dqliteRequest{
 		Version:   protocolVersion,
@@ -221,11 +256,8 @@ func (c *DqliteClient) Query(ctx context.Context, ns string, sql string, limit i
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	if resp.Error != "" {
-		return nil, errors.New(resp.Error)
-	}
-	if resp.Version != protocolVersion {
-		return nil, errors.Errorf("unsupported server version: %q", resp.Version)
+	if err := c.validateResponse(resp, "query"); err != nil {
+		return nil, err
 	}
 	var result DqliteQueryResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
@@ -234,6 +266,7 @@ func (c *DqliteClient) Query(ctx context.Context, ns string, sql string, limit i
 	return &result, nil
 }
 
+// Cluster returns Dqlite cluster node information.
 func (c *DqliteClient) Cluster(ctx context.Context) ([]DqliteNode, error) {
 	req := dqliteRequest{
 		Version:   protocolVersion,
@@ -244,11 +277,8 @@ func (c *DqliteClient) Cluster(ctx context.Context) ([]DqliteNode, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	if resp.Error != "" {
-		return nil, errors.New(resp.Error)
-	}
-	if resp.Version != protocolVersion {
-		return nil, errors.Errorf("unsupported server version: %q", resp.Version)
+	if err := c.validateResponse(resp, "cluster"); err != nil {
+		return nil, err
 	}
 	var nodes []DqliteNode
 	if err := json.Unmarshal(resp.Result, &nodes); err != nil {

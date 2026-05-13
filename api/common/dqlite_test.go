@@ -39,6 +39,15 @@ func handshakeResponse() []byte {
 	return mustMarshal(map[string]string{"version": "v1"})
 }
 
+func commonResponseWithResult(requestType string, result json.RawMessage) []byte {
+	return mustMarshal(map[string]any{
+		"version":    "v1",
+		"request_id": "req1",
+		"type":       requestType,
+		"result":     result,
+	})
+}
+
 // mockStream implements base.Stream for testing.
 type mockStream struct {
 	responses  chan []byte
@@ -119,7 +128,8 @@ func (s *DqliteClientSuite) TestOpenDqliteHandshakeSucceeds(c *tc.C) {
 	c.Assert(err, tc.ErrorIsNil)
 	defer client.Close()
 
-	c.Check(connector.stream.getWritten(), tc.HasLen, 1)
+	written := connector.stream.getWritten()
+	c.Assert(written, tc.HasLen, 1)
 }
 
 func (s *DqliteClientSuite) TestOpenDqliteHandshakeError(c *tc.C) {
@@ -146,6 +156,14 @@ func (s *DqliteClientSuite) TestOpenDqliteHandshakeReadError(c *tc.C) {
 	c.Assert(err, tc.ErrorMatches, "version handshake read: unexpected EOF")
 }
 
+func (s *DqliteClientSuite) TestNewRequestIDProducesDifferentValues(c *tc.C) {
+	id1 := common.NewRequestID()
+	id2 := common.NewRequestID()
+	c.Check(id1, tc.Not(tc.Equals), id2)
+	c.Check(id1, tc.HasLen, 8)
+	c.Check(id2, tc.HasLen, 8)
+}
+
 func (s *DqliteClientSuite) TestDatabases(c *tc.C) {
 	databases := []common.DqliteDatabase{
 		{Name: "controller", Namespace: "controller", Type: "controller"},
@@ -161,16 +179,9 @@ func (s *DqliteClientSuite) TestDatabases(c *tc.C) {
 	result, err := client.Databases(c.Context())
 	c.Assert(err, tc.ErrorIsNil)
 	c.Check(result, tc.DeepEquals, databases)
-	c.Check(connector.stream.written, tc.HasLen, 2)
-}
 
-func commonResponseWithResult(requestType string, result json.RawMessage) []byte {
-	return mustMarshal(map[string]any{
-		"version":    "v1",
-		"request_id": "req1",
-		"type":       requestType,
-		"result":     result,
-	})
+	written := connector.stream.getWritten()
+	c.Check(written, tc.HasLen, 2)
 }
 
 func (s *DqliteClientSuite) TestObjects(c *tc.C) {
@@ -253,6 +264,39 @@ func (s *DqliteClientSuite) TestServerError(c *tc.C) {
 	c.Assert(err, tc.ErrorMatches, "query timeout")
 }
 
+func (s *DqliteClientSuite) TestObjectsServerError(c *tc.C) {
+	errResp := mustMarshal(map[string]string{"version": "v1", "error": "server error"})
+	connector := newMockConnector(handshakeResponse(), errResp)
+	client, err := common.OpenDqlite(c.Context(), connector)
+	c.Assert(err, tc.ErrorIsNil)
+	defer client.Close()
+
+	_, err = client.Objects(c.Context(), "ns1", "table")
+	c.Assert(err, tc.ErrorMatches, "server error")
+}
+
+func (s *DqliteClientSuite) TestDDLServerError(c *tc.C) {
+	errResp := mustMarshal(map[string]string{"version": "v1", "error": "not found"})
+	connector := newMockConnector(handshakeResponse(), errResp)
+	client, err := common.OpenDqlite(c.Context(), connector)
+	c.Assert(err, tc.ErrorIsNil)
+	defer client.Close()
+
+	_, err = client.DDL(c.Context(), "ns1", "nonexistent")
+	c.Assert(err, tc.ErrorMatches, "not found")
+}
+
+func (s *DqliteClientSuite) TestClusterServerError(c *tc.C) {
+	errResp := mustMarshal(map[string]string{"version": "v1", "error": "unavailable"})
+	connector := newMockConnector(handshakeResponse(), errResp)
+	client, err := common.OpenDqlite(c.Context(), connector)
+	c.Assert(err, tc.ErrorIsNil)
+	defer client.Close()
+
+	_, err = client.Cluster(c.Context())
+	c.Assert(err, tc.ErrorMatches, "unavailable")
+}
+
 func (s *DqliteClientSuite) TestVersionMismatchOnResponse(c *tc.C) {
 	mismatchResp := mustMarshal(map[string]string{"version": "v99"})
 	connector := newMockConnector(handshakeResponse(), mismatchResp)
@@ -298,34 +342,33 @@ func (s *DqliteClientSuite) TestConcurrentSends(c *tc.C) {
 	dbResp := commonResponseWithResult("databases", mustMarshal([]common.DqliteDatabase{
 		{Name: "controller", Namespace: "controller", Type: "controller"},
 	}))
-	clusterResp := commonResponseWithResult("cluster", mustMarshal([]common.DqliteNode{
-		{ID: "01", Address: "10.0.0.1:12345", Role: "voter"},
+	dbResp2 := commonResponseWithResult("databases", mustMarshal([]common.DqliteDatabase{
+		{Name: "lxd-pilot", UUID: "deadbeef", Namespace: "deadbeef", Type: "model"},
 	}))
-	connector := newMockConnector(handshakeResponse(), dbResp, clusterResp)
+	connector := newMockConnector(handshakeResponse(), dbResp, dbResp2)
 	client, err := common.OpenDqlite(c.Context(), connector)
 	c.Assert(err, tc.ErrorIsNil)
 	defer client.Close()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	var dbResult []common.DqliteDatabase
-	var clusterResult []common.DqliteNode
-	var dbErr, clusterErr error
+	var result1, result2 []common.DqliteDatabase
+	var dbErr1, dbErr2 error
 
 	go func() {
 		defer wg.Done()
-		dbResult, dbErr = client.Databases(c.Context())
+		result1, dbErr1 = client.Databases(c.Context())
 	}()
 	go func() {
 		defer wg.Done()
-		clusterResult, clusterErr = client.Cluster(c.Context())
+		result2, dbErr2 = client.Databases(c.Context())
 	}()
 	wg.Wait()
 
-	c.Assert(dbErr, tc.ErrorIsNil)
-	c.Check(dbResult, tc.HasLen, 1)
-	c.Assert(clusterErr, tc.ErrorIsNil)
-	c.Check(clusterResult, tc.HasLen, 1)
+	c.Assert(dbErr1, tc.ErrorIsNil)
+	c.Check(result1, tc.HasLen, 1)
+	c.Assert(dbErr2, tc.ErrorIsNil)
+	c.Check(result2, tc.HasLen, 1)
 }
 
 func (s *DqliteClientSuite) TestClose(c *tc.C) {
@@ -336,4 +379,43 @@ func (s *DqliteClientSuite) TestClose(c *tc.C) {
 	err = client.Close()
 	c.Assert(err, tc.ErrorIsNil)
 	c.Check(connector.stream.closeCount, tc.Equals, 1)
+}
+
+func (s *DqliteClientSuite) TestDoubleClose(c *tc.C) {
+	connector := newMockConnector(handshakeResponse())
+	client, err := common.OpenDqlite(c.Context(), connector)
+	c.Assert(err, tc.ErrorIsNil)
+
+	err = client.Close()
+	c.Assert(err, tc.ErrorIsNil)
+	err = client.Close()
+	c.Assert(err, tc.ErrorIsNil)
+	c.Check(connector.stream.closeCount, tc.Equals, 2)
+}
+
+func (s *DqliteClientSuite) TestResponseTypeMismatch(c *tc.C) {
+	databases := mustMarshal([]common.DqliteDatabase{
+		{Name: "controller", Namespace: "controller", Type: "controller"},
+	})
+	resp := commonResponseWithResult("cluster", databases)
+	connector := newMockConnector(handshakeResponse(), resp)
+	client, err := common.OpenDqlite(c.Context(), connector)
+	c.Assert(err, tc.ErrorIsNil)
+	defer client.Close()
+
+	_, err = client.Databases(c.Context())
+	c.Assert(err, tc.ErrorMatches, `unexpected response type: "cluster" \(expected "databases"\)`)
+}
+
+func (s *DqliteClientSuite) TestContextCancellation(c *tc.C) {
+	ctx, cancel := context.WithCancel(c.Context())
+	cancel()
+
+	connector := newMockConnector(handshakeResponse())
+	client, err := common.OpenDqlite(ctx, connector)
+	c.Assert(err, tc.ErrorIsNil)
+	defer client.Close()
+
+	_, err = client.Databases(ctx)
+	c.Assert(err, tc.ErrorMatches, "context error: context canceled")
 }

@@ -10,13 +10,18 @@ Tasks are ordered to produce a **runnable demo as early as possible**.
 | 1 — TUI model with hardcoded mock data | ✅ Complete | `d4e6d19` |
 | 2 — `dbDebugCommand` + registration | ✅ Complete | `06dd39c` (initial), `6aeead5` (test fixes) |
 | 3 — TUI model tests | ✅ Complete | Pending commit |
-| 4 — Client package `api/common/dqlite.go` | ⬜ Not started | — |
+| 4 — Client package `api/common/dqlite.go` | ✅ Complete | `b60c6d1` (initial), `PENDING` (review fixes) |
 | 5 — Backend handler `apiserver/dqlite.go` | ⬜ Not started | — |
 | 6 — Wire real client | ⬜ Not started | — |
 | 7 — Memory files | ⬜ Not started | — |
 
 ## Deviations from spec
 
+- **`OpenDqlite` parameter type** (Task 4): The Phase 01 spec uses
+  `base.StreamConnector` but calls `ConnectControllerStream`, which only exists
+  on `base.ControllerStreamConnector`. The implementation uses
+  `base.ControllerStreamConnector` as the parameter type, which is the correct
+  interface for controller-scoped endpoints like `/dqlite`.
 - **ctrl+enter / ctrl+1/2/3 keybind tests** (Task 3): Omitted because bubbletea v1.3.10
   does not expose `KeyCtrlEnter`, `KeyCtrl1`, `KeyCtrl2`, `KeyCtrl3` as `KeyType`
   constants. These key combinations cannot be constructed as `tea.KeyMsg` in tests.
