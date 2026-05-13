@@ -86,6 +86,32 @@ func newOptions() *option {
 	}
 }
 
+// TxnHooks are optional callbacks invoked around each write
+// transaction. The sqlair pair (Setup/Finalise) is used by Txn;
+// the stdlib pair (StdSetup/StdFinalise) is used by StdTxn.
+type TxnHooks struct {
+	// Setup is called immediately after BEGIN IMMEDIATE on the
+	// sqlair (Txn) write-transaction path, before the user callback
+	// runs. If it returns an error the transaction is rolled back.
+	Setup func(ctx context.Context, tx *sqlair.TX) error
+
+	// Finalise is called after the user callback returns nil,
+	// before COMMIT, on the sqlair (Txn) write-transaction path.
+	// If it returns an error the transaction is rolled back.
+	Finalise func(ctx context.Context, tx *sqlair.TX) error
+
+	// StdSetup is called immediately after BEGIN IMMEDIATE on the
+	// stdlib (StdTxn) write-transaction path, before the user
+	// callback runs. If it returns an error the transaction is
+	// rolled back.
+	StdSetup func(ctx context.Context, tx *sql.Tx) error
+
+	// StdFinalise is called after the user callback returns nil,
+	// before COMMIT, on the stdlib (StdTxn) write-transaction path.
+	// If it returns an error the transaction is rolled back.
+	StdFinalise func(ctx context.Context, tx *sql.Tx) error
+}
+
 // RetryingTxnRunner defines a generic runner for applying transactions
 // to a given database. It expects that no individual transaction function
 // should take longer than the default timeout.
@@ -94,9 +120,19 @@ type RetryingTxnRunner struct {
 	timeout       time.Duration
 	logger        logger.Logger
 	retryStrategy RetryStrategy
+	hooks         TxnHooks
 	tracePool     sync.Pool
 	loggerPool    sync.Pool
 	txnID         uint64
+}
+
+// NewRetryingTxnRunnerWithHooks returns a new RetryingTxnRunner
+// that invokes hooks around each write transaction. Existing callers
+// using NewRetryingTxnRunner are unaffected.
+func NewRetryingTxnRunnerWithHooks(hooks TxnHooks, opts ...Option) *RetryingTxnRunner {
+	r := NewRetryingTxnRunner(opts...)
+	r.hooks = hooks
+	return r
 }
 
 // NewRetryingTxnRunner returns a new RetryingTxnRunner.
@@ -146,28 +182,91 @@ func NewRetryingTxnRunner(opts ...Option) *RetryingTxnRunner {
 //
 // This should not be used directly, instead the TxnRunner should be used to
 // handle transactions.
-func (t *RetryingTxnRunner) Txn(ctx context.Context, db *sqlair.DB, fn func(context.Context, *sqlair.TX) error) error {
+func (t *RetryingTxnRunner) Txn(
+	ctx context.Context,
+	db *sqlair.DB,
+	fn func(context.Context, *sqlair.TX) error,
+) error {
 	return t.run(ctx, func(ctx context.Context) error {
-		tx, err := db.Begin(ctx, nil)
-		if err != nil {
-			// This was lifted from the LXD code.
-			// It has been observed that we can get into a strange state when
-			// Dqlite is busy performing a checkpoint operation.
-			// This is an attempt to save an otherwise poisoned database.
-			if strings.Contains(err.Error(), txnInTxn) {
-				_, _ = db.PlainDB().Exec("ROLLBACK")
-				return ErrTxnInTxn
-			}
-			return errors.Trace(err)
+		if t.hooks.Setup == nil {
+			return t.txnOnce(ctx, db, fn)
 		}
-
-		if err := fn(ctx, tx); err != nil {
-			t.rollback(ctx, tx)
-			return errors.Trace(err)
-		}
-
-		return errors.Trace(t.commit(ctx, tx))
+		return t.txnWithHooks(ctx, db, fn)
 	})
+}
+
+func (t *RetryingTxnRunner) txnOnce(
+	ctx context.Context,
+	db *sqlair.DB,
+	fn func(context.Context, *sqlair.TX) error,
+) error {
+	tx, err := db.Begin(ctx, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), txnInTxn) {
+			_, _ = db.PlainDB().Exec("ROLLBACK")
+			return ErrTxnInTxn
+		}
+		return errors.Trace(err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	return errors.Trace(t.commit(ctx, tx))
+}
+
+func (t *RetryingTxnRunner) txnWithHooks(
+	ctx context.Context,
+	db *sqlair.DB,
+	fn func(context.Context, *sqlair.TX) error,
+) error {
+	// Attempt a read-only transaction first. If the caller writes,
+	// SQLite returns SQLITE_READONLY and we upgrade to a write
+	// transaction with hooks.
+	tx, err := db.Begin(ctx, &sqlair.TXOptions{ReadOnly: true})
+	if err != nil {
+		if strings.Contains(err.Error(), txnInTxn) {
+			_, _ = db.PlainDB().Exec("ROLLBACK")
+			return ErrTxnInTxn
+		}
+		return errors.Trace(err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		if !isReadOnlyError(err) {
+			return errors.Trace(err)
+		}
+		return t.txnWriteWithHooks(ctx, db, fn)
+	}
+	return errors.Trace(t.commit(ctx, tx))
+}
+
+func (t *RetryingTxnRunner) txnWriteWithHooks(
+	ctx context.Context,
+	db *sqlair.DB,
+	fn func(context.Context, *sqlair.TX) error,
+) error {
+	tx, err := db.Begin(ctx, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), txnInTxn) {
+			_, _ = db.PlainDB().Exec("ROLLBACK")
+			return ErrTxnInTxn
+		}
+		return errors.Trace(err)
+	}
+	if err := t.hooks.Setup(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	if err := t.hooks.Finalise(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	return errors.Trace(t.commit(ctx, tx))
 }
 
 // StdTxn executes the input function against the tracked database,
@@ -178,28 +277,91 @@ func (t *RetryingTxnRunner) Txn(ctx context.Context, db *sqlair.DB, fn func(cont
 //
 // This should not be used directly, instead the TxnRunner should be used to
 // handle transactions.
-func (t *RetryingTxnRunner) StdTxn(ctx context.Context, db *sql.DB, fn func(context.Context, *sql.Tx) error) error {
+func (t *RetryingTxnRunner) StdTxn(
+	ctx context.Context,
+	db *sql.DB,
+	fn func(context.Context, *sql.Tx) error,
+) error {
 	return t.run(ctx, func(ctx context.Context) error {
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			// This was lifted from the LXD code.
-			// It has been observed that we can get into a strange state when
-			// Dqlite is busy performing a checkpoint operation.
-			// This is an attempt to save an otherwise poisoned database.
-			if strings.Contains(err.Error(), txnInTxn) {
-				_, _ = db.Exec("ROLLBACK")
-				return ErrTxnInTxn
-			}
-			return errors.Trace(err)
+		if t.hooks.StdSetup == nil {
+			return t.stdTxnOnce(ctx, db, fn)
 		}
-
-		if err := fn(ctx, tx); err != nil {
-			t.rollback(ctx, tx)
-			return errors.Trace(err)
-		}
-
-		return errors.Trace(t.commit(ctx, tx))
+		return t.stdTxnWithHooks(ctx, db, fn)
 	})
+}
+
+func (t *RetryingTxnRunner) stdTxnOnce(
+	ctx context.Context,
+	db *sql.DB,
+	fn func(context.Context, *sql.Tx) error,
+) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), txnInTxn) {
+			_, _ = db.Exec("ROLLBACK")
+			return ErrTxnInTxn
+		}
+		return errors.Trace(err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	return errors.Trace(t.commit(ctx, tx))
+}
+
+func (t *RetryingTxnRunner) stdTxnWithHooks(
+	ctx context.Context,
+	db *sql.DB,
+	fn func(context.Context, *sql.Tx) error,
+) error {
+	// Attempt a read-only transaction first. If the caller writes,
+	// SQLite returns SQLITE_READONLY and we upgrade to a write
+	// transaction with hooks.
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		if strings.Contains(err.Error(), txnInTxn) {
+			_, _ = db.Exec("ROLLBACK")
+			return ErrTxnInTxn
+		}
+		return errors.Trace(err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		if !isReadOnlyError(err) {
+			return errors.Trace(err)
+		}
+		return t.stdTxnWriteWithHooks(ctx, db, fn)
+	}
+	return errors.Trace(t.commit(ctx, tx))
+}
+
+func (t *RetryingTxnRunner) stdTxnWriteWithHooks(
+	ctx context.Context,
+	db *sql.DB,
+	fn func(context.Context, *sql.Tx) error,
+) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), txnInTxn) {
+			_, _ = db.Exec("ROLLBACK")
+			return ErrTxnInTxn
+		}
+		return errors.Trace(err)
+	}
+	if err := t.hooks.StdSetup(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	if err := t.hooks.StdFinalise(ctx, tx); err != nil {
+		t.rollback(ctx, tx)
+		return errors.Trace(err)
+	}
+	return errors.Trace(t.commit(ctx, tx))
 }
 
 // commit is split out as we can't pass a context directly to the commit.
@@ -320,6 +482,23 @@ func (t *RetryingTxnRunner) run(ctx context.Context, fn func(context.Context) er
 	}
 
 	return errors.Trace(err)
+}
+
+// isReadOnlyError reports whether err indicates a write was attempted
+// on a read-only transaction (SQLITE_READONLY).
+func isReadOnlyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	for ; err != nil; err = errors.Unwrap(err) {
+		if strings.Contains(
+			err.Error(),
+			"attempt to write a readonly database",
+		) {
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultRetryStrategy returns a function that can be used to apply a default

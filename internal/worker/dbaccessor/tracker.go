@@ -86,8 +86,9 @@ type trackedDBWorker struct {
 	dbApp     DBApp
 	namespace string
 
-	mutex sync.RWMutex
-	db    *sqlair.DB
+	mutex  sync.RWMutex
+	db     *sqlair.DB
+	runner *txn.RetryingTxnRunner
 
 	clock        clock.Clock
 	logger       logger.Logger
@@ -126,6 +127,17 @@ func newTrackedDBWorker(
 
 	// Set the db transaction metrics for the namespace.
 	w.dbTxnMetrics = w.metrics.DBMetricsForNamespace(namespace)
+
+	// Build a runner with change_log hooks so every write transaction
+	// stamps txn_id and trace context into the change_log tables.
+	runnerOpts := []txn.Option{}
+	if w.logger != nil {
+		runnerOpts = append(runnerOpts, txn.WithLogger(w.logger))
+	}
+	w.runner = txn.NewRetryingTxnRunnerWithHooks(
+		database.ChangeLogTxnHooks(),
+		runnerOpts...,
+	)
 
 	db, err := w.openDatabase(ctx)
 	if err != nil {
@@ -214,7 +226,7 @@ func (w *trackedDBWorker) Txn(ctx context.Context, fn func(context.Context, *sql
 		// now have the correct reason for the death of the transaction. Either
 		// the tomb died or the context was cancelled.
 		ctx = corecontext.WithSourceableError(w.tomb.Context(ctx), w)
-		return errors.Trace(database.Txn(ctx, db, fn))
+		return errors.Trace(w.runner.Txn(ctx, db, fn))
 	})
 }
 
@@ -230,7 +242,7 @@ func (w *trackedDBWorker) StdTxn(ctx context.Context, fn func(context.Context, *
 		// now have the correct reason for the death of the transaction. Either
 		// the tomb died or the context was cancelled.
 		ctx = corecontext.WithSourceableError(w.tomb.Context(ctx), w)
-		return errors.Trace(database.StdTxn(ctx, db.PlainDB(), fn))
+		return errors.Trace(w.runner.StdTxn(ctx, db.PlainDB(), fn))
 	})
 }
 
