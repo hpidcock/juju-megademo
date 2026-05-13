@@ -27,14 +27,12 @@ type DebugChangeStreamStepArgs struct {
 
 // DebugChangeStreamDBResult holds the result for one database.
 type DebugChangeStreamDBResult struct {
-	// Name is "controller" or the model UUID.
-	Name string `json:"name"`
-	// TxnMin is the lowest txn_id consumed (0 if already at head).
-	TxnMin int64 `json:"txn-min"`
-	// TxnMax is the highest txn_id consumed.
-	TxnMax int64 `json:"txn-max"`
-	// EventCount is the number of change events that became visible.
+	Name       string `json:"name"`
+	TxnMin     int64  `json:"txn-min"`
+	TxnMax     int64  `json:"txn-max"`
 	EventCount int    `json:"event-count"`
+	TraceID    string `json:"trace-id,omitempty"`
+	SpanID     string `json:"span-id,omitempty"`
 	Error      *Error `json:"error,omitempty"`
 }
 
@@ -46,4 +44,17 @@ type DebugChangeStreamPauseResult struct {
 // DebugChangeStreamStepResult holds the results for a Step call.
 type DebugChangeStreamStepResult struct {
 	Results []DebugChangeStreamDBResult `json:"results"`
+}
+
+// DebugChangeStreamDBStatus holds the status for one database.
+type DebugChangeStreamDBStatus struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+	TxnID int64  `json:"txn-id"`
+	Error *Error `json:"error,omitempty"`
+}
+
+// DebugChangeStreamStatusResult holds the results for a Status call.
+type DebugChangeStreamStatusResult struct {
+	Results []DebugChangeStreamDBStatus `json:"results"`
 }

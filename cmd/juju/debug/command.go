@@ -111,7 +111,7 @@ func (c *debugCommand) Run(ctx *cmd.Context) error {
 		tempoAPI = NewTempoClient(endpoint)
 	}
 
-	debugAPI := newMockDebugChangeStreamAPI()
+	debugAPI := newDebugChangeStreamAPIClient(apiRoot)
 	modelLister := newModelListAPIClient(modelManagerClient, accountDetails.User)
 	defer modelManagerClient.Close()
 	defer debugAPI.Close()

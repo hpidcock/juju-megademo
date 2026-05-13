@@ -404,3 +404,58 @@ func (c *MockStateSetStepCall) DoAndReturn(
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// LatestTraceInTxnRange mocks base method.
+func (m *MockState) LatestTraceInTxnRange(
+	arg0 context.Context, arg1, arg2 int64,
+) (string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestTraceInTxnRange", arg0, arg1, arg2)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LatestTraceInTxnRange indicates an expected call of LatestTraceInTxnRange.
+func (mr *MockStateMockRecorder) LatestTraceInTxnRange(
+	arg0, arg1, arg2 any,
+) *MockStateLatestTraceInTxnRangeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(
+		mr.mock,
+		"LatestTraceInTxnRange",
+		reflect.TypeOf((*MockState)(nil).LatestTraceInTxnRange),
+		arg0, arg1, arg2,
+	)
+	return &MockStateLatestTraceInTxnRangeCall{Call: call}
+}
+
+// MockStateLatestTraceInTxnRangeCall wrap *gomock.Call
+type MockStateLatestTraceInTxnRangeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockStateLatestTraceInTxnRangeCall) Return(
+	arg0 string, arg1 string, arg2 error,
+) *MockStateLatestTraceInTxnRangeCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockStateLatestTraceInTxnRangeCall) Do(
+	f func(context.Context, int64, int64) (string, string, error),
+) *MockStateLatestTraceInTxnRangeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockStateLatestTraceInTxnRangeCall) DoAndReturn(
+	f func(context.Context, int64, int64) (string, string, error),
+) *MockStateLatestTraceInTxnRangeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

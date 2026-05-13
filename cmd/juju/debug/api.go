@@ -5,12 +5,16 @@ package debug
 
 import (
 	"context"
+	"strings"
 
 	"github.com/juju/juju/api"
+	"github.com/juju/juju/api/base"
+	"github.com/juju/juju/api/client/debugchangestream"
 	"github.com/juju/juju/api/client/modelmanager"
 	apicontroller "github.com/juju/juju/api/controller/controller"
 	"github.com/juju/juju/api/common"
 	"github.com/juju/juju/controller"
+	"github.com/juju/juju/rpc/params"
 )
 
 type TempoAPI interface {
@@ -59,11 +63,90 @@ type StreamStatus struct {
 	TxnID int64
 }
 
+type StepResult struct {
+	TxnMin     int64
+	TxnMax     int64
+	EventCount int
+	TraceID    string
+	SpanID     string
+}
+
 type DebugChangeStreamAPI interface {
 	Status(ctx context.Context) ([]StreamStatus, error)
 	Pause(ctx context.Context, modelUUID string) error
+	Step(ctx context.Context, modelUUID string, count int) ([]StepResult, error)
 	Resume(ctx context.Context, modelUUID string) error
 	Close() error
+}
+
+type debugChangeStreamAPIClient struct {
+	client *debugchangestream.Client
+}
+
+func newDebugChangeStreamAPIClient(caller base.APICallCloser) *debugChangeStreamAPIClient {
+	return &debugChangeStreamAPIClient{
+		client: debugchangestream.NewClient(caller),
+	}
+}
+
+func (c *debugChangeStreamAPIClient) Status(ctx context.Context) ([]StreamStatus, error) {
+	result, err := c.client.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]StreamStatus, 0, len(result.Results))
+	for _, r := range result.Results {
+		status := StreamStatus{
+			Name:  r.Name,
+			State: strings.ToUpper(r.State),
+			TxnID: r.TxnID,
+		}
+		if r.Error != nil {
+			continue
+		}
+		out = append(out, status)
+	}
+	return out, nil
+}
+
+func (c *debugChangeStreamAPIClient) Pause(ctx context.Context, modelUUID string) error {
+	_, err := c.client.Pause(ctx, params.DebugChangeStreamTarget{
+		ModelUUID: modelUUID,
+	})
+	return err
+}
+
+func (c *debugChangeStreamAPIClient) Step(ctx context.Context, modelUUID string, count int) ([]StepResult, error) {
+	result, err := c.client.Step(ctx, params.DebugChangeStreamTarget{
+		ModelUUID: modelUUID,
+	}, count)
+	if err != nil {
+		return nil, err
+	}
+	var out []StepResult
+	for _, r := range result.Results {
+		if r.Error != nil {
+			continue
+		}
+		out = append(out, StepResult{
+			TxnMin:     r.TxnMin,
+			TxnMax:     r.TxnMax,
+			EventCount: r.EventCount,
+			TraceID:    r.TraceID,
+			SpanID:     r.SpanID,
+		})
+	}
+	return out, nil
+}
+
+func (c *debugChangeStreamAPIClient) Resume(ctx context.Context, modelUUID string) error {
+	return c.client.Resume(ctx, params.DebugChangeStreamTarget{
+		ModelUUID: modelUUID,
+	})
+}
+
+func (c *debugChangeStreamAPIClient) Close() error {
+	return c.client.Close()
 }
 
 type ModelInfo struct {

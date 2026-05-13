@@ -254,3 +254,44 @@ AND    txn_id <= $M.max_txn;`,
 	}
 	return int(count), nil
 }
+
+// LatestTraceInTxnRange returns the trace_id and span_id from the
+// change_log row with the highest txn_id in the inclusive range
+// [minTxn, maxTxn].
+func (st *State) LatestTraceInTxnRange(
+	ctx context.Context, minTxn, maxTxn int64,
+) (string, string, error) {
+	db, err := st.DB(ctx)
+	if err != nil {
+		return "", "", errors.Capture(err)
+	}
+
+	stmt, err := st.Prepare(`
+SELECT &dbTraceInfo.* FROM change_log
+WHERE  txn_id >= $M.min_txn AND txn_id <= $M.max_txn
+ORDER BY txn_id DESC LIMIT 1;`,
+		dbTraceInfo{},
+		sqlair.M{},
+	)
+	if err != nil {
+		return "", "", errors.Errorf(
+			"preparing latest trace query: %w", err,
+		)
+	}
+
+	var info dbTraceInfo
+	err = db.Txn(ctx, func(ctx context.Context, tx *sqlair.TX) error {
+		err := tx.Query(
+			ctx, stmt,
+			sqlair.M{"min_txn": minTxn, "max_txn": maxTxn},
+		).Get(&info)
+		if errors.Is(err, sqlair.ErrNoRows) {
+			return nil
+		}
+		return errors.Capture(err)
+	})
+	if err != nil {
+		return "", "", errors.Capture(err)
+	}
+	return info.TraceID, info.SpanID, nil
+}

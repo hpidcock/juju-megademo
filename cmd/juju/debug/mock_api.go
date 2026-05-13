@@ -25,6 +25,10 @@ func (m *mockDebugChangeStreamAPI) Pause(_ context.Context, _ string) error {
 	return nil
 }
 
+func (m *mockDebugChangeStreamAPI) Step(_ context.Context, _ string, _ int) ([]StepResult, error) {
+	return nil, nil
+}
+
 func (m *mockDebugChangeStreamAPI) Resume(_ context.Context, _ string) error {
 	return nil
 }

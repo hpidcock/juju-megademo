@@ -11,7 +11,7 @@ import (
 )
 
 type selectTxnMsg struct {
-	txnIndex int
+	txn transactionEntry
 }
 
 type switchModelMsg struct {
@@ -26,8 +26,23 @@ type listModelsMsg struct {
 }
 
 type statusTickMsg time.Time
+type stepResultMsg struct {
+	results []StepResult
+	err     error
+}
 
-type changestreamTickMsg time.Time
+type pauseResultMsg struct {
+	err error
+}
+
+type resumeResultMsg struct {
+	err error
+}
+
+type statusResultMsg struct {
+	statuses []StreamStatus
+	err      error
+}
 
 type logMsg struct {
 	record  common.LogMessage

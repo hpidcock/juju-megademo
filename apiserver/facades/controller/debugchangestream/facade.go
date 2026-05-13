@@ -28,6 +28,8 @@ type DebugChangeStreamService interface {
 		ctx context.Context, count int,
 	) ([]debugchangestreamservice.StepResult, error)
 	Resume(ctx context.Context) error
+	Status(ctx context.Context) (string, error)
+	CurrentTxnID(ctx context.Context) (int64, error)
 }
 
 // ModelListService lists all models known to the controller.
@@ -225,6 +227,9 @@ func (api *API) Step(
 			if stepErr == nil && len(stepResults) > 0 {
 				res.TxnMin = stepResults[0].TxnMin
 				res.TxnMax = stepResults[len(stepResults)-1].TxnMax
+				last := stepResults[len(stepResults)-1]
+				res.TraceID = last.TraceID
+				res.SpanID = last.SpanID
 				for _, r := range stepResults {
 					res.EventCount += r.EventCount
 				}
@@ -260,4 +265,58 @@ func (api *API) Resume(
 		})
 	}
 	return g.Wait()
+}
+
+// Status returns the debug state and current txn_id for all databases.
+func (api *API) Status(
+	ctx context.Context,
+) (params.DebugChangeStreamStatusResult, error) {
+	if err := api.checkAuth(ctx); err != nil {
+		return params.DebugChangeStreamStatusResult{}, err
+	}
+
+	type dbInfo struct {
+		svc  DebugChangeStreamService
+		name string
+	}
+
+	dbs := []dbInfo{{svc: api.controllerSvc, name: "controller"}}
+
+	models, err := api.modelListSvc.GetAllModels(ctx)
+	if err != nil {
+		return params.DebugChangeStreamStatusResult{}, errors.Errorf(
+			"listing models: %w", err,
+		)
+	}
+	for _, m := range models {
+		svc, svcErr := api.modelSvcGetter(ctx, m.UUID)
+		if svcErr != nil {
+			continue
+		}
+		dbs = append(dbs, dbInfo{svc: svc, name: m.UUID.String()})
+	}
+
+	results := make([]params.DebugChangeStreamDBStatus, len(dbs))
+	var mu sync.Mutex
+	g, gCtx := errgroup.WithContext(ctx)
+	for i, db := range dbs {
+		i, db := i, db
+		g.Go(func() error {
+			state, stateErr := db.svc.Status(gCtx)
+			txnID, txnErr := db.svc.CurrentTxnID(gCtx)
+			mu.Lock()
+			results[i] = params.DebugChangeStreamDBStatus{
+				Name:  db.name,
+				State: state,
+				TxnID: txnID,
+				Error: apiservererrors.ServerError(
+					errors.Join(stateErr, txnErr),
+				),
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return params.DebugChangeStreamStatusResult{Results: results}, nil
 }

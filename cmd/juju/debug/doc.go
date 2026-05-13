@@ -64,26 +64,17 @@
 //
 // # Changestream refresh cycle
 //
-// The changestreamModel drives a periodic tick (changestreamTickMsg) every
-// 500ms. On each tick, if the current model's changestream is not paused,
-// the model replaces its transaction list with a fresh set (capped at 10
-// entries). This ensures the TUI stays up-to-date with the stream of new
-// transactions. When paused, ticks are ignored and the transaction list is
-// frozen.
-//
-// A separate statusTickMsg polls the DebugChangeStreamAPI.Status method to
-// refresh the state of all models.
+// The changestreamModel polls the DebugChangeStreamAPI.Status method on a
+// timed interval (statusTickMsg, every 500ms) to refresh the state of all
+// models. The transaction list starts empty and is populated exclusively by
+// step results; it is not replaced on status polls.
 //
 // # Phased implementation
 //
 // The current implementation uses mock data in some areas. Each mock is
 // annotated with a TODO comment referencing the phase that replaces it:
 //
-//   - changestream transactions  -> phase-04 (DebugChangeStream facade)
-//   - pause/resume/step actions  -> phase-04 (DebugChangeStream facade)
-//   - step-N (S key)             -> phase-04 (DebugChangeStream.Step)
 //   - trace spans                -> phase-02 (Grafana Tempo)
-//   - status polling             -> phase-04 (DebugChangeStream facade)
 //
 // See specs/debug-tui/README.md for the full phase index and dependency graph.
 //

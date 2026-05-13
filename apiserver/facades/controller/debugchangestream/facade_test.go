@@ -31,6 +31,10 @@ type stubChangeStreamSvc struct {
 	stepRes   []debugchangestreamservice.StepResult
 	stepErr   error
 	resumeErr error
+	statusRes string
+	statusErr error
+	txnIDRes  int64
+	txnIDErr  error
 }
 
 func (s *stubChangeStreamSvc) Pause(_ context.Context) error {
@@ -45,6 +49,14 @@ func (s *stubChangeStreamSvc) Step(
 
 func (s *stubChangeStreamSvc) Resume(_ context.Context) error {
 	return s.resumeErr
+}
+
+func (s *stubChangeStreamSvc) Status(_ context.Context) (string, error) {
+	return s.statusRes, s.statusErr
+}
+
+func (s *stubChangeStreamSvc) CurrentTxnID(_ context.Context) (int64, error) {
+	return s.txnIDRes, s.txnIDErr
 }
 
 // stubModelListSvc is a manual stub for ModelListService.

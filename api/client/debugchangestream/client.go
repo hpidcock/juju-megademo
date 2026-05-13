@@ -69,3 +69,12 @@ func (c *Client) Resume(
 	args := params.DebugChangeStreamArgs{Target: target}
 	return c.facade.FacadeCall(ctx, "Resume", args, nil)
 }
+
+// Status returns the debug state and current txn_id for all databases.
+func (c *Client) Status(
+	ctx context.Context,
+) (params.DebugChangeStreamStatusResult, error) {
+	var result params.DebugChangeStreamStatusResult
+	err := c.facade.FacadeCall(ctx, "Status", nil, &result)
+	return result, err
+}

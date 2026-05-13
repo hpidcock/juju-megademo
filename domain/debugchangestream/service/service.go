@@ -16,46 +16,36 @@ import (
 
 // State defines the persistence operations required by Service.
 type State interface {
-	// CurrentTxnID returns the current value of change_log_txn_seq.
 	CurrentTxnID(ctx context.Context) (int64, error)
 
-	// DebugState returns the current state and step_target from
-	// debug_change_stream.
 	DebugState(
 		ctx context.Context,
 	) (state string, stepTarget int64, err error)
 
-	// SetPaused writes state='paused' to debug_change_stream.
 	SetPaused(ctx context.Context) error
 
-	// SetStep writes state='step' and the given step_target to
-	// debug_change_stream.
 	SetStep(ctx context.Context, stepTarget int64) error
 
-	// SetRunning writes state='running' to debug_change_stream.
 	SetRunning(ctx context.Context) error
 
-	// AllNodesReachedTxn returns true when every row in
-	// change_log_witness has upper_bound >= txnID.
 	AllNodesReachedTxn(ctx context.Context, txnID int64) (bool, error)
 
-	// EventCountInRange returns the number of change_log rows whose
-	// txn_id is in the inclusive range [minTxn, maxTxn].
 	EventCountInRange(
 		ctx context.Context, minTxn, maxTxn int64,
 	) (int, error)
+
+	LatestTraceInTxnRange(
+		ctx context.Context, minTxn, maxTxn int64,
+	) (traceID, spanID string, err error)
 }
 
 // StepResult describes what was consumed during a single sub-step.
 type StepResult struct {
-	// TxnMin is the lowest txn_id dispatched.
-	TxnMin int64
-	// TxnMax is the highest txn_id dispatched (= step_target).
-	TxnMax int64
-	// EventCount is the number of change_log rows in the
-	// [TxnMin, TxnMax] txn_id range. This represents how many
-	// events became visible to the system during the step.
+	TxnMin     int64
+	TxnMax     int64
 	EventCount int
+	TraceID    string
+	SpanID     string
 }
 
 // Service provides pause, step, and resume operations on a single
@@ -154,10 +144,22 @@ func (s *Service) Step(
 			)
 		}
 
+		traceID, spanID, traceErr := s.st.LatestTraceInTxnRange(
+			ctx, txnMin, currentTxn,
+		)
+		if traceErr != nil {
+			s.logger.Debugf(
+				ctx, "reading trace context: %v", traceErr,
+			)
+			traceID, spanID = "", ""
+		}
+
 		results = append(results, StepResult{
 			TxnMin:     txnMin,
 			TxnMax:     currentTxn,
 			EventCount: eventCount,
+			TraceID:    traceID,
+			SpanID:     spanID,
 		})
 		lastWatermark = currentTxn
 	}
@@ -212,4 +214,13 @@ func (s *Service) Status(ctx context.Context) (string, error) {
 		return "", errors.Errorf("reading debug state: %w", err)
 	}
 	return state, nil
+}
+
+// CurrentTxnID returns the current value of change_log_txn_seq.
+func (s *Service) CurrentTxnID(ctx context.Context) (int64, error) {
+	id, err := s.st.CurrentTxnID(ctx)
+	if err != nil {
+		return 0, errors.Errorf("reading txn seq: %w", err)
+	}
+	return id, nil
 }

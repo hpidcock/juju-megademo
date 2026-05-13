@@ -80,6 +80,12 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		if m.changestream.stepInputMode == stepInputActive {
+			var cmd tea.Cmd
+			m.changestream, cmd = m.changestream.Update(msg)
+			return m, cmd
+		}
+
 		if m.log.filtering {
 			switch msg.String() {
 			case "esc":
@@ -166,17 +172,13 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	if selectMsg, ok := msg.(selectTxnMsg); ok {
-		ms := m.changestream.currentModelState()
-		if ms != nil && selectMsg.txnIndex >= 0 && selectMsg.txnIndex < len(ms.Transactions) {
-			txn := ms.Transactions[selectMsg.txnIndex]
-			m.trace.setTransaction(txn)
-			var cmds []tea.Cmd
-			if m.trace.spinning && m.trace.fetching != "" {
-				cmds = append(cmds, m.trace.Init())
-				cmds = append(cmds, fetchTraceCmd(m.trace.tempoAPI, m.trace.fetching))
-			}
-			return m, tea.Batch(cmds...)
+		m.trace.setTransaction(selectMsg.txn)
+		var cmds []tea.Cmd
+		if m.trace.spinning && m.trace.fetching != "" {
+			cmds = append(cmds, m.trace.Init())
+			cmds = append(cmds, fetchTraceCmd(m.trace.tempoAPI, m.trace.fetching))
 		}
+		return m, tea.Batch(cmds...)
 	}
 
 	if switchMsg, ok := msg.(switchModelMsg); ok {
@@ -184,6 +186,7 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modelUUID = switchMsg.modelUUID
 		m.changestream.currentModel = switchMsg.modelUUID
 		m.changestream.cursor = 0
+		m.changestream.headerErr = ""
 		m.trace = newTraceModel(m.trace.tempoAPI)
 		if m.switchModelFunc != nil {
 			_ = m.switchModelFunc(switchMsg.modelName)

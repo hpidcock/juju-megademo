@@ -6,9 +6,10 @@ package debug
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
+	"strconv"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -31,6 +32,13 @@ type modelState struct {
 	PausedTxnIdx int
 }
 
+type stepInputMode int
+
+const (
+	stepInputNone stepInputMode = iota
+	stepInputActive
+)
+
 type changestreamModel struct {
 	width        int
 	height       int
@@ -39,12 +47,17 @@ type changestreamModel struct {
 	models       map[string]*modelState
 	cursor       int
 
-	pickerOpen   bool
-	pickerItems  []ModelInfo
-	pickerCursor int
+	pickerOpen      bool
+	pickerItems     []ModelInfo
+	pickerCursor    int
+	controllerModel string
 
 	api         DebugChangeStreamAPI
 	modelLister ModelListAPI
+
+	stepInputMode stepInputMode
+	stepInput     textinput.Model
+	headerErr     string
 
 	viewport viewport.Model
 	ready    bool
@@ -60,74 +73,32 @@ func newChangestreamModel(api DebugChangeStreamAPI, modelLister ModelListAPI, in
 			Name:         initialModelName,
 			UUID:         initialModelUUID,
 			Status:       "RUNNING",
-			Transactions: generateMockTransactions(100),
+			Transactions: nil,
 			PausedTxnIdx: -1,
 		},
 	}
+
+	ti := textinput.New()
+	ti.Placeholder = "count"
+	ti.CharLimit = 5
+	ti.Prompt = "Step N: "
+
 	return changestreamModel{
 		active:       true,
 		currentModel: initialModelUUID,
 		models:       models,
 		api:          api,
 		modelLister:  modelLister,
+		stepInputMode: stepInputNone,
+		stepInput:    ti,
 	}
-}
-
-// TODO(phase-04): Replace mock transaction generation with real data from
-// the DebugChangeStream facade.
-func generateMockTransactions(baseID int64) []transactionEntry {
-	count := rand.IntN(7) + 4
-	txns := make([]transactionEntry, count)
-	for i := range count {
-		txnID := baseID + int64(count-1-i)
-		txns[i] = transactionEntry{
-			TxnID:      txnID,
-			EventCount: rand.IntN(5) + 1,
-			TraceID:    randomMockTraceID(),
-			SpanID:     randomHex(8),
-		}
-	}
-	return txns
-}
-
-var mockTraceIDs = []string{
-	"f0250316350d16f308b71ab93cbf7510",
-	"c23d861742e1815509564a7d176d3590",
-	"6aa4a72c364edbd109cbf40d3520c1ae",
-}
-
-func randomHex(n int) string {
-	const hexChars = "0123456789abcdef"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = hexChars[rand.IntN(len(hexChars))]
-	}
-	return string(b)
-}
-
-func randomMockTraceID() string {
-	if len(mockTraceIDs) > 0 {
-		return mockTraceIDs[rand.IntN(len(mockTraceIDs))]
-	}
-	return randomHex(12)
 }
 
 func (m changestreamModel) Init() tea.Cmd {
 	return tea.Batch(
-		tickChangestream,
 		m.scheduleStatusPoll(),
 		m.fetchModelsCmd(),
 	)
-}
-
-func tickChangestream() tea.Msg {
-	return changestreamTickMsg(time.Now())
-}
-
-func scheduleChangestreamTick() tea.Cmd {
-	return tea.Tick(changestreamTickInterval, func(t time.Time) tea.Msg {
-		return changestreamTickMsg(t)
-	})
 }
 
 func (m changestreamModel) scheduleStatusPoll() tea.Cmd {
@@ -150,11 +121,87 @@ func (m changestreamModel) fetchModelsForPickerCmd() tea.Cmd {
 	}
 }
 
+func (m changestreamModel) pauseCmd(modelUUID string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.api.Pause(context.Background(), modelUUID)
+		return pauseResultMsg{err: err}
+	}
+}
+
+func (m changestreamModel) pauseAllCmd() tea.Cmd {
+	var cmds []tea.Cmd
+	for uuid, ms := range m.models {
+		if !ms.Paused {
+			cmds = append(cmds, func(uuid string) tea.Cmd {
+				return func() tea.Msg {
+					err := m.api.Pause(context.Background(), uuid)
+					return pauseResultMsg{err: err}
+				}
+			}(uuid))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m changestreamModel) resumeCmd(modelUUID string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.api.Resume(context.Background(), modelUUID)
+		return resumeResultMsg{err: err}
+	}
+}
+
+func (m changestreamModel) stepCmd(modelUUID string, count int) tea.Cmd {
+	return func() tea.Msg {
+		results, err := m.api.Step(context.Background(), modelUUID, count)
+		return stepResultMsg{results: results, err: err}
+	}
+}
+
+func (m changestreamModel) statusCmd() tea.Cmd {
+	return func() tea.Msg {
+		statuses, err := m.api.Status(context.Background())
+		return statusResultMsg{statuses: statuses, err: err}
+	}
+}
+
 func (m changestreamModel) Update(msg tea.Msg) (changestreamModel, tea.Cmd) {
 	if m.pickerOpen {
 		return m.updatePicker(msg)
 	}
+	if m.stepInputMode == stepInputActive {
+		return m.updateStepInput(msg)
+	}
 	return m.updateNormal(msg)
+}
+
+func (m changestreamModel) updateStepInput(msg tea.Msg) (changestreamModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			count, err := strconv.Atoi(m.stepInput.Value())
+			m.stepInputMode = stepInputNone
+			m.stepInput.Blur()
+			if err != nil || count < 1 {
+				m.headerErr = "Invalid step count"
+				return m, nil
+			}
+			ms := m.currentModelState()
+			if ms != nil {
+				return m, m.stepCmd(ms.UUID, count)
+			}
+			return m, nil
+		case "esc":
+			m.stepInputMode = stepInputNone
+			m.stepInput.Blur()
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.stepInput, cmd = m.stepInput.Update(msg)
+			return m, cmd
+		}
+	}
+	return m, nil
 }
 
 func (m changestreamModel) updatePicker(msg tea.Msg) (changestreamModel, tea.Cmd) {
@@ -205,20 +252,111 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 		}
 		return m, nil
 
-	case changestreamTickMsg:
-		ms := m.currentModelState()
-		if ms != nil && !ms.Paused {
-			ms.Transactions = generateMockTransactions(ms.TxnID + int64(rand.IntN(20)+1))
-			m.clampCursor()
+	case statusResultMsg:
+		if msg.err == nil {
+			for _, s := range msg.statuses {
+				uuid := s.Name
+				if s.Name == "controller" && m.controllerModel != "" {
+					uuid = m.controllerModel
+				}
+				if ms, ok := m.models[uuid]; ok {
+					ms.Status = s.State
+					ms.TxnID = s.TxnID
+				}
+			}
+			cur := m.currentModelState()
+			if cur != nil {
+				cur.Paused = cur.Status == "PAUSED" || cur.Status == "STEP"
+				if !cur.Paused {
+					cur.PausedTxnIdx = -1
+				}
+			}
+			if m.ready {
+				m.viewport.SetContent(m.renderRows())
+				m.syncViewportToCursor()
+			}
 		}
+		return m, m.scheduleStatusPoll()
+
+	case statusTickMsg:
+		return m, m.statusCmd()
+
+	case stepResultMsg:
+		if msg.err != nil {
+			m.headerErr = fmt.Sprintf("Step failed: %v", msg.err)
+			return m, nil
+		}
+		m.headerErr = ""
+		ms := m.currentModelState()
+		if ms == nil {
+			return m, nil
+		}
+		for i := len(msg.results) - 1; i >= 0; i-- {
+			r := msg.results[i]
+			txnMin := r.TxnMin
+			txnMax := r.TxnMax
+			if txnMax == 0 && r.EventCount == 0 {
+				continue
+			}
+			if txnMin == txnMax {
+				entry := transactionEntry{
+					TxnID:      txnMin,
+					EventCount: r.EventCount,
+					TraceID:    r.TraceID,
+					SpanID:     r.SpanID,
+				}
+				ms.Transactions = prependTransaction(ms.Transactions, entry)
+			} else {
+				entry := transactionEntry{
+					TxnID:      txnMax,
+					EventCount: r.EventCount,
+					TraceID:    r.TraceID,
+					SpanID:     r.SpanID,
+				}
+				ms.Transactions = prependTransaction(ms.Transactions, entry)
+			}
+		}
+		if len(ms.Transactions) > 0 {
+			m.cursor = 0
+		}
+		ms.Status = "PAUSED"
+		ms.Paused = true
+		ms.PausedTxnIdx = 0
 		if m.ready {
 			m.viewport.SetContent(m.renderRows())
 			m.syncViewportToCursor()
 		}
-		return m, scheduleChangestreamTick()
+		if len(ms.Transactions) > 0 {
+			return m, func() tea.Msg {
+				return selectTxnMsg{txn: ms.Transactions[0]}
+			}
+		}
+		return m, nil
 
-	case statusTickMsg:
-		return m, m.scheduleStatusPoll()
+	case pauseResultMsg:
+		if msg.err != nil {
+			m.headerErr = fmt.Sprintf("Pause failed: %v", msg.err)
+			return m, nil
+		}
+		m.headerErr = ""
+		return m, nil
+
+	case resumeResultMsg:
+		if msg.err != nil {
+			m.headerErr = fmt.Sprintf("Resume failed: %v", msg.err)
+			return m, nil
+		}
+		m.headerErr = ""
+		ms := m.currentModelState()
+		if ms != nil {
+			ms.Paused = false
+			ms.PausedTxnIdx = -1
+			ms.Status = "RUNNING"
+		}
+		if m.ready {
+			m.viewport.SetContent(m.renderRows())
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -240,40 +378,36 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 		case "enter":
 			ms := m.currentModelState()
 			if ms != nil && m.cursor >= 0 && m.cursor < len(ms.Transactions) {
-				selectedIdx := m.cursor
+				selected := ms.Transactions[m.cursor]
 				return m, func() tea.Msg {
-					return selectTxnMsg{txnIndex: selectedIdx}
+					return selectTxnMsg{txn: selected}
 				}
 			}
 		case "p":
 			ms := m.currentModelState()
 			if ms != nil && !ms.Paused {
-				ms.Paused = true
-				ms.PausedTxnIdx = 0
-				ms.Status = "PAUSED"
+				return m, m.pauseCmd(ms.UUID)
 			}
 		case "P":
-			for _, ms := range m.models {
-				if !ms.Paused {
-					ms.Paused = true
-					ms.PausedTxnIdx = 0
-					ms.Status = "PAUSED"
-				}
-			}
+			return m, m.pauseAllCmd()
 		case "r":
 			ms := m.currentModelState()
 			if ms != nil && ms.Paused {
-				ms.Paused = false
-				ms.PausedTxnIdx = -1
-				ms.Status = "RUNNING"
+				return m, m.resumeCmd(ms.UUID)
 			}
 		case "s":
 			ms := m.currentModelState()
-			if ms != nil && ms.Paused && ms.PausedTxnIdx >= 0 && ms.PausedTxnIdx < len(ms.Transactions)-1 {
-				ms.PausedTxnIdx++
-				ms.Status = "STEP"
+			if ms != nil && ms.Paused {
+				return m, m.stepCmd(ms.UUID, 1)
 			}
 		case "S":
+			ms := m.currentModelState()
+			if ms != nil && ms.Paused {
+				m.stepInputMode = stepInputActive
+				m.stepInput.SetValue("")
+				m.stepInput.Focus()
+				return m, nil
+			}
 		case "m":
 			return m, m.fetchModelsForPickerCmd()
 		}
@@ -294,14 +428,25 @@ func (m changestreamModel) updateNormal(msg tea.Msg) (changestreamModel, tea.Cmd
 	return m, nil
 }
 
+func prependTransaction(txs []transactionEntry, tx transactionEntry) []transactionEntry {
+	txs = append([]transactionEntry{tx}, txs...)
+	if len(txs) > maxTransactions {
+		txs = txs[:maxTransactions]
+	}
+	return txs
+}
+
 func (m *changestreamModel) mergeModels(infos []ModelInfo) {
 	for _, info := range infos {
+		if info.IsController {
+			m.controllerModel = info.UUID
+		}
 		if _, exists := m.models[info.UUID]; !exists {
 			m.models[info.UUID] = &modelState{
 				Name:         info.Name,
 				UUID:         info.UUID,
 				Status:       "RUNNING",
-				Transactions: generateMockTransactions(100),
+				Transactions: nil,
 				PausedTxnIdx: -1,
 			}
 		}
@@ -390,13 +535,18 @@ func (m changestreamModel) viewNormal() string {
 		Bold(true).
 		Foreground(lipgloss.Color("228"))
 
+	errStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("9"))
+
 	title := headerStyle.Render("Changestream")
 
 	ms := m.currentModelState()
 
 	var shortcuts string
-	if ms != nil && ms.Paused {
-		shortcuts = shortcutStyle.Render("[s]tep [r]esume")
+	if m.stepInputMode == stepInputActive {
+		shortcuts = shortcutStyle.Render(m.stepInput.View())
+	} else if ms != nil && ms.Paused {
+		shortcuts = shortcutStyle.Render("[s]tep [S]tepN [r]esume")
 	} else {
 		shortcuts = shortcutStyle.Render("[p]ause [P]ause all")
 	}
@@ -421,6 +571,10 @@ func (m changestreamModel) viewNormal() string {
 	}
 
 	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", shortcuts, "  ", status, modelLabel)
+
+	if m.headerErr != "" {
+		headerLine += "\n" + errStyle.Render(m.headerErr)
+	}
 
 	var content string
 	if m.ready {
@@ -506,7 +660,7 @@ func (m changestreamModel) viewPicker() string {
 func (m *changestreamModel) pausedModelUUIDs() []string {
 	var uuids []string
 	for uuid, ms := range m.models {
-		if ms.Paused {
+		if ms.Paused || ms.Status == "STEP" {
 			uuids = append(uuids, uuid)
 		}
 	}
