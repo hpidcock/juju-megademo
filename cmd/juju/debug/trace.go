@@ -192,10 +192,12 @@ func (m traceModel) renderSpans() string {
 	var b strings.Builder
 
 	if m.tempoAPI == nil || !m.tempoAPI.IsConfigured() {
+		b.WriteString(fmt.Sprintf("trace %s — span %s\n", m.selectedTxn.TraceID, m.selectedTxn.SpanID))
 		b.WriteString(notConfiguredMessage())
 	} else if m.spinning && m.fetching == m.selectedTxn.TraceID {
 		b.WriteString(m.spinner.View() + " fetching trace…")
 	} else if m.fetchErr != "" && m.fetching == "" {
+		b.WriteString(fmt.Sprintf("trace %s — span %s\n", m.selectedTxn.TraceID, m.selectedTxn.SpanID))
 		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 		b.WriteString(errStyle.Render(m.fetchErr))
 	} else if cached, ok := m.traceCache[m.selectedTxn.TraceID]; ok {
