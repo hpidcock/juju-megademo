@@ -4,7 +4,10 @@
 package debug
 
 import (
+	"context"
 	"time"
+
+	"github.com/juju/juju/api/common"
 )
 
 type selectTxnMsg struct {
@@ -12,3 +15,19 @@ type selectTxnMsg struct {
 }
 
 type changestreamTickMsg time.Time
+
+type logMsg struct {
+	record  common.LogMessage
+	version int
+}
+
+type logStreamReadyMsg struct {
+	ch      <-chan common.LogMessage
+	cancel  context.CancelFunc
+	version int
+	err     error
+}
+
+type logStreamDoneMsg struct {
+	version int
+}

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -17,9 +17,10 @@ type spanEntry struct {
 }
 
 type traceModel struct {
-	width      int
-	height     int
-	entries    []spanEntry
+	width       int
+	height      int
+	active      bool
+	entries     []spanEntry
 	selectedTxn *transactionEntry
 }
 
@@ -54,9 +55,13 @@ func (m *traceModel) setTransaction(txn transactionEntry) {
 }
 
 func (m traceModel) View() string {
+	borderColor := lipgloss.Color("62")
+	if m.active {
+		borderColor = lipgloss.Color("86")
+	}
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
+		BorderForeground(borderColor).
 		PaddingLeft(1).
 		PaddingRight(1).
 		Width(m.width - 2).

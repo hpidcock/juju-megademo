@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/juju/gnuflag"
 	"github.com/mattn/go-isatty"
 
@@ -36,10 +36,10 @@ type debugCommand struct {
 
 func (c *debugCommand) Info() *cmd.Info {
 	return jujucmd.Info(&cmd.Info{
-		Name:     "debug",
-		Purpose:  "Launch an interactive TUI for inspecting and controlling the Juju changestream.",
-		Doc:      debugCommandDoc,
-		SeeAlso:  []string{"debug-log", "debug-hooks", "debug-code"},
+		Name:    "debug",
+		Purpose: "Launch an interactive TUI for inspecting and controlling the Juju changestream.",
+		Doc:     debugCommandDoc,
+		SeeAlso: []string{"debug-log", "debug-hooks", "debug-code"},
 	})
 }
 
@@ -67,7 +67,13 @@ func (c *debugCommand) Run(ctx *cmd.Context) error {
 		modelName = ""
 	}
 
-	model := newDebugModel(controllerName, modelName)
+	apiRoot, err := c.NewAPIRoot(ctx)
+	if err != nil {
+		return fmt.Errorf("connecting to API: %w", err)
+	}
+
+	logAPI := newLogAPIClient(apiRoot)
+	model := newDebugModel(controllerName, modelName, logAPI)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI exited with error: %w", err)

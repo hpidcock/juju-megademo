@@ -14,6 +14,7 @@ const (
 	changestreamPane pane = iota
 	logPane
 	tracePane
+	numPanes
 )
 
 type debugModel struct {
@@ -32,12 +33,13 @@ type debugModel struct {
 	quitting bool
 }
 
-func newDebugModel(controllerName, modelName string) debugModel {
+func newDebugModel(controllerName, modelName string, logAPI LogAPI) debugModel {
 	return debugModel{
 		controllerName: controllerName,
 		modelName:      modelName,
+		activePane:     changestreamPane,
 		changestream:   newChangestreamModel(),
-		log:            newLogModel(),
+		log:            newLogModel(logAPI),
 		trace:          newTraceModel(),
 		help:           newHelpModel(),
 	}
@@ -47,14 +49,35 @@ func (m debugModel) Init() tea.Cmd {
 	return tea.Batch(
 		tea.EnterAltScreen,
 		m.changestream.Init(),
+		m.log.Init(),
 	)
 }
 
 func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.log.filtering {
+			switch msg.String() {
+			case "esc":
+				var cmd tea.Cmd
+				m.log, cmd = m.log.Update(msg)
+				return m, cmd
+			case "enter":
+				var cmd tea.Cmd
+				m.log, cmd = m.log.Update(msg)
+				return m, cmd
+			default:
+				var cmd tea.Cmd
+				m.log, cmd = m.log.Update(msg)
+				return m, cmd
+			}
+		}
+
 		switch msg.String() {
 		case "q":
+			if m.log.streamCancel != nil {
+				m.log.streamCancel()
+			}
 			m.quitting = true
 			return m, tea.Quit
 		case "?":
@@ -65,12 +88,29 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 				return m, nil
 			}
-		case "m":
-			// TODO(phase-03): Implement model switching -- show a list of
-			// available models (including the controller model) and allow
-			// selection. Update modelName and refresh changestream data for
-			// the new model.
+		case "tab":
+			m.activePane = (m.activePane + 1) % numPanes
+			m.syncActiveState()
 			return m, nil
+		case "shift+tab":
+			m.activePane = (m.activePane - 1 + numPanes) % numPanes
+			m.syncActiveState()
+			return m, nil
+		}
+
+		switch m.activePane {
+		case changestreamPane:
+			var cmd tea.Cmd
+			m.changestream, cmd = m.changestream.Update(msg)
+			return m, cmd
+		case logPane:
+			var cmd tea.Cmd
+			m.log, cmd = m.log.Update(msg)
+			return m, cmd
+		case tracePane:
+			var cmd tea.Cmd
+			m.trace, cmd = m.trace.Update(msg)
+			return m, cmd
 		}
 
 	case tea.WindowSizeMsg:
@@ -107,6 +147,12 @@ func (m debugModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *debugModel) syncActiveState() {
+	m.changestream.active = m.activePane == changestreamPane
+	m.log.active = m.activePane == logPane
+	m.trace.active = m.activePane == tracePane
 }
 
 func (m debugModel) View() string {

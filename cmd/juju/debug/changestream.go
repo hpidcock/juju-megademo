@@ -8,7 +8,7 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -20,13 +20,14 @@ type transactionEntry struct {
 }
 
 type changestreamModel struct {
-	width         int
-	height        int
-	transactions  []transactionEntry
-	cursor        int
-	paused        bool
-	pausedTxnIdx  int
-	nextTxnID     int64
+	width        int
+	height       int
+	active       bool
+	transactions []transactionEntry
+	cursor       int
+	paused       bool
+	pausedTxnIdx int
+	nextTxnID    int64
 }
 
 const maxTransactions = 10
@@ -35,6 +36,7 @@ const changestreamTickInterval = 500 * time.Millisecond
 
 func newChangestreamModel() changestreamModel {
 	m := changestreamModel{
+		active:       true,
 		nextTxnID:    100,
 		pausedTxnIdx: -1,
 	}
@@ -79,6 +81,12 @@ func tickChangestream() tea.Msg {
 	return changestreamTickMsg(time.Now())
 }
 
+func scheduleChangestreamTick() tea.Cmd {
+	return tea.Tick(changestreamTickInterval, func(t time.Time) tea.Msg {
+		return changestreamTickMsg(t)
+	})
+}
+
 func (m changestreamModel) Update(msg tea.Msg) (changestreamModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case changestreamTickMsg:
@@ -89,7 +97,7 @@ func (m changestreamModel) Update(msg tea.Msg) (changestreamModel, tea.Cmd) {
 			m.transactions = newTxns
 			m.clampCursor()
 		}
-		return m, tickChangestream
+		return m, scheduleChangestreamTick()
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -196,9 +204,13 @@ func (m changestreamModel) View() string {
 
 	content := headerLine + "\n" + rows
 
+	borderColor := lipgloss.Color("62")
+	if m.active {
+		borderColor = lipgloss.Color("86")
+	}
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
+		BorderForeground(borderColor).
 		PaddingLeft(1).
 		PaddingRight(1).
 		Width(m.width - 2).
