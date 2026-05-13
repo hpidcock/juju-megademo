@@ -3,7 +3,11 @@
 
 package watchertest
 
-import "gopkg.in/tomb.v2"
+import (
+	"context"
+
+	"gopkg.in/tomb.v2"
+)
 
 type MockWatcher[T any] struct {
 	tomb tomb.Tomb
@@ -29,4 +33,12 @@ func (w *MockWatcher[T]) Kill() {
 
 func (w *MockWatcher[T]) Wait() error {
 	return w.tomb.Wait()
+}
+
+// ChangeContext implements watcher.Watcher. MockWatcher carries no
+// trace context, so parent is returned unchanged.
+func (w *MockWatcher[T]) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

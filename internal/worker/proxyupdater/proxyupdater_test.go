@@ -59,6 +59,13 @@ func (w notAWatcher) Changes() watcher.NotifyChannel {
 	return w.NotAWatcher.Changes()
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w notAWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 type fakeAPI struct {
 	proxies proxyupdaterapi.ProxyConfiguration
 	Err     error

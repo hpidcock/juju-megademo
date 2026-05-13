@@ -91,3 +91,12 @@ func (w *addressChangeNotifyWatcher) Wait() error {
 func (w *addressChangeNotifyWatcher) Changes() <-chan struct{} {
 	return w.changes
 }
+
+// ChangeContext implements watcher.Watcher. This watcher listens to
+// kernel address events and has no changestream context, so parent
+// is returned unchanged.
+func (w *addressChangeNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}

@@ -163,6 +163,8 @@ func (w *NamespaceWatcher) loop() error {
 				continue
 			}
 
+			w.setLastTrace(subChanges)
+
 			// We have changes. Tick over to dispatch mode.
 			changes = changed
 			in = nil

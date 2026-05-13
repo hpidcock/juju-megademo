@@ -159,6 +159,13 @@ func (m *mockNotifyWatcher) Changes() watcher.NotifyChannel {
 	return m.changes
 }
 
+// ChangeContext implements watcher.Watcher.
+func (m *mockNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 var _ watcher.NotifyWatcher = (*mockNotifyWatcher)(nil)
 
 type mockAPI struct {

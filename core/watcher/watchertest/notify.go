@@ -4,6 +4,7 @@
 package watchertest
 
 import (
+	"context"
 	"time"
 
 	"github.com/juju/tc"
@@ -29,6 +30,13 @@ func NewMockNotifyWatcher(ch <-chan struct{}) *MockNotifyWatcher {
 
 func (w *MockNotifyWatcher) Changes() <-chan struct{} {
 	return w.ch
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *MockNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }
 
 func (w *MockNotifyWatcher) Stop() error {

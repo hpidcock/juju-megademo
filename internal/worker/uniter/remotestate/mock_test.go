@@ -31,6 +31,13 @@ type mockWatcher struct {
 	stopped chan struct{}
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *mockWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (w *mockWatcher) Kill() {
 	w.mu.Lock()
 	defer w.mu.Unlock()

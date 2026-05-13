@@ -309,6 +309,8 @@ type RemoteApplicationResults struct {
 type RemoteApplicationWatchResult struct {
 	RemoteApplicationWatcherId string                   `json:"id"`
 	Change                     *RemoteApplicationChange `json:"change,omitempty"`
+	TraceID                    string                   `json:"trace-id,omitempty"`
+	SpanID                     string                   `json:"span-id,omitempty"`
 	Error                      *Error                   `json:"error,omitempty"`
 }
 
@@ -418,6 +420,8 @@ func (e *RemoteRelationChangeEvent) GoString() string {
 type RemoteRelationWatchResult struct {
 	RemoteRelationWatcherId string                    `json:"watcher-id"`
 	Changes                 RemoteRelationChangeEvent `json:"changes"`
+	TraceID                 string                    `json:"trace-id,omitempty"`
+	SpanID                  string                    `json:"span-id,omitempty"`
 	Error                   *Error                    `json:"error,omitempty"`
 }
 
@@ -447,6 +451,8 @@ type RelationLifeSuspendedStatusChange struct {
 type RelationLifeSuspendedStatusWatchResult struct {
 	RelationStatusWatcherId string                              `json:"watcher-id"`
 	Changes                 []RelationLifeSuspendedStatusChange `json:"changes"`
+	TraceID                 string                              `json:"trace-id,omitempty"`
+	SpanID                  string                              `json:"span-id,omitempty"`
 	Error                   *Error                              `json:"error,omitempty"`
 }
 
@@ -471,6 +477,8 @@ type OfferStatusChange struct {
 type OfferStatusWatchResult struct {
 	OfferStatusWatcherId string              `json:"watcher-id"`
 	Changes              []OfferStatusChange `json:"changes"`
+	TraceID              string              `json:"trace-id,omitempty"`
+	SpanID               string              `json:"span-id,omitempty"`
 	Error                *Error              `json:"error,omitempty"`
 }
 

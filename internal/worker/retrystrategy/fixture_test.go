@@ -125,6 +125,13 @@ func (w *stubWatcher) Changes() watcher.NotifyChannel {
 	return w.notifyChan
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *stubWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 type stubTag struct {
 	names.Tag
 }

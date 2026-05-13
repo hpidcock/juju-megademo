@@ -4,6 +4,8 @@
 package crosscontroller
 
 import (
+	"context"
+
 	"gopkg.in/tomb.v2"
 )
 
@@ -36,4 +38,10 @@ func (w *mockNotifyWatcher) Kill() {
 
 func (w *mockNotifyWatcher) Changes() <-chan struct{} {
 	return w.changes
+}
+
+func (w *mockNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

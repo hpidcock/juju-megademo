@@ -137,6 +137,14 @@ func (w *kubernetesNotifyWatcher) Wait() error {
 	return w.catacomb.Wait()
 }
 
+// ChangeContext implements watcher.Watcher. Kubernetes watchers have
+// no access to changestream events, so parent is returned unchanged.
+func (w *kubernetesNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 type KubernetesStringsWatcher = watcher.StringsWatcher
 
 type kubernetesStringsWatcher struct {
@@ -258,4 +266,12 @@ func (w *kubernetesStringsWatcher) Kill() {
 // error encountered when it was running.
 func (w *kubernetesStringsWatcher) Wait() error {
 	return w.catacomb.Wait()
+}
+
+// ChangeContext implements watcher.Watcher. Kubernetes watchers have
+// no access to changestream events, so parent is returned unchanged.
+func (w *kubernetesStringsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

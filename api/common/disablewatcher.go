@@ -4,6 +4,8 @@
 package common
 
 import (
+	"context"
+
 	"gopkg.in/tomb.v2"
 
 	"github.com/juju/juju/core/watcher"
@@ -59,4 +61,12 @@ func (d *disabledWatcher) Kill() {
 
 func (d *disabledWatcher) Wait() error {
 	return d.tomb.Wait()
+}
+
+// ChangeContext implements watcher.Watcher. This watcher emits no
+// changestream events, so parent is returned unchanged.
+func (d *disabledWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

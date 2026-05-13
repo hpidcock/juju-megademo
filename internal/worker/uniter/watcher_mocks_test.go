@@ -4,6 +4,7 @@
 package uniter_test
 
 import (
+	"context"
 	"sync"
 
 	"github.com/juju/juju/core/watcher"
@@ -18,6 +19,13 @@ func newMockWatcher() *mockWatcher {
 type mockWatcher struct {
 	mu      sync.Mutex
 	stopped chan struct{}
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *mockWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }
 
 func (w *mockWatcher) Kill() {

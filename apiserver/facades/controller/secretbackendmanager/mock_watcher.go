@@ -10,6 +10,7 @@
 package secretbackendmanager
 
 import (
+	context "context"
 	reflect "reflect"
 
 	watcher "github.com/juju/juju/core/watcher"
@@ -37,6 +38,44 @@ func NewMockSecretBackendRotateWatcher(ctrl *gomock.Controller) *MockSecretBacke
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockSecretBackendRotateWatcher) EXPECT() *MockSecretBackendRotateWatcherMockRecorder {
 	return m.recorder
+}
+
+// ChangeContext mocks base method.
+func (m *MockSecretBackendRotateWatcher) ChangeContext(arg0 context.Context) context.Context {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChangeContext", arg0)
+	ret0, _ := ret[0].(context.Context)
+	return ret0
+}
+
+// ChangeContext indicates an expected call of ChangeContext.
+func (mr *MockSecretBackendRotateWatcherMockRecorder) ChangeContext(arg0 any) *MockSecretBackendRotateWatcherChangeContextCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChangeContext", reflect.TypeOf((*MockSecretBackendRotateWatcher)(nil).ChangeContext), arg0)
+	return &MockSecretBackendRotateWatcherChangeContextCall{Call: call}
+}
+
+// MockSecretBackendRotateWatcherChangeContextCall wrap *gomock.Call
+type MockSecretBackendRotateWatcherChangeContextCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSecretBackendRotateWatcherChangeContextCall) Return(arg0 context.Context) *MockSecretBackendRotateWatcherChangeContextCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSecretBackendRotateWatcherChangeContextCall) Do(f func(context.Context) context.Context) *MockSecretBackendRotateWatcherChangeContextCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSecretBackendRotateWatcherChangeContextCall) DoAndReturn(f func(context.Context) context.Context) *MockSecretBackendRotateWatcherChangeContextCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // Changes mocks base method.

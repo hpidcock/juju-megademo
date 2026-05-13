@@ -72,6 +72,7 @@ func (s *offerStatusWatcherSuite) TestNext(c *tc.C) {
 	changes <- struct{}{}
 	s.watcher.EXPECT().Changes().Return(changes)
 	s.watcher.EXPECT().OfferUUID().Return(offerUUID)
+	s.watcher.EXPECT().ChangeContext(gomock.Any()).Return(c.Context())
 	s.statusService.EXPECT().GetOfferStatus(gomock.Any(), offerUUID).Return(status.StatusInfo{
 		Status:  status.Active,
 		Message: "message",
@@ -130,6 +131,7 @@ func (s *remoteRelationWatcherSuite) TestNext(c *tc.C) {
 	changes := make(chan struct{}, 1)
 	changes <- struct{}{}
 	s.watcher.EXPECT().Changes().Return(changes)
+	s.watcher.EXPECT().ChangeContext(gomock.Any()).Return(c.Context())
 
 	s.api.data = domainrelation.ConsumerRelationUnitsChange{
 		UnitsSettingsVersions: map[string]int64{
@@ -199,6 +201,7 @@ func (s *remoteRelationWatcherSuite) TestNextNoApplicationSettingsChange(c *tc.C
 	changes := make(chan struct{}, 1)
 	changes <- struct{}{}
 	s.watcher.EXPECT().Changes().Return(changes)
+	s.watcher.EXPECT().ChangeContext(gomock.Any()).Return(c.Context())
 
 	s.api.data = domainrelation.ConsumerRelationUnitsChange{
 		UnitsSettingsVersions: map[string]int64{
@@ -266,6 +269,7 @@ func (s *remoteRelationWatcherSuite) TestNextNoChangeThenChange(c *tc.C) {
 	changes <- struct{}{}
 	changes <- struct{}{}
 	s.watcher.EXPECT().Changes().Return(changes).MinTimes(1)
+	s.watcher.EXPECT().ChangeContext(gomock.Any()).Return(c.Context()).AnyTimes()
 
 	s.api.data = domainrelation.ConsumerRelationUnitsChange{
 		UnitsSettingsVersions: map[string]int64{
@@ -364,6 +368,7 @@ func (s *relationStatusWatcherSuite) TestNext(c *tc.C) {
 	changes <- struct{}{}
 	s.watcher.EXPECT().Changes().Return(changes)
 	s.watcher.EXPECT().RelationUUID().Return(relationUUID)
+	s.watcher.EXPECT().ChangeContext(gomock.Any()).Return(c.Context())
 	s.relationService.EXPECT().GetRelationLifeSuspendedStatus(gomock.Any(), relationUUID).Return(
 		domainrelation.RelationLifeSuspendedStatus{
 			Key:             "key",

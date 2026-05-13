@@ -97,6 +97,13 @@ func (w *modelFirewallRulesWatcher) Changes() <-chan struct{} {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *modelFirewallRulesWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (w *modelFirewallRulesWatcher) Kill() {
 	w.catacomb.Kill(nil)
 }

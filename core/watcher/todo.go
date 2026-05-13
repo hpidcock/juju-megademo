@@ -43,6 +43,13 @@ func (w *todoWatcher[T]) Changes() <-chan T {
 	return w.ch
 }
 
+// ChangeContext implements Watcher.
+func (w *todoWatcher[T]) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (w *todoWatcher[T]) Report(_ context.Context) map[string]any {
 	return map[string]any{
 		"type": "TODOWatcher",

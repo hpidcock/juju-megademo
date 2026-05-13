@@ -144,3 +144,12 @@ func (w *secretWatcher[T]) Kill() {
 func (w *secretWatcher[T]) Wait() error {
 	return w.catacomb.Wait()
 }
+
+// ChangeContext implements watcher.Watcher. Secret watchers wrap a
+// source watcher and have no direct changestream context, so parent
+// is returned unchanged.
+func (w *secretWatcher[T]) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}

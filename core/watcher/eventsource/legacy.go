@@ -70,6 +70,13 @@ func (w *StringsNotifyWatcher) Changes() <-chan struct{} {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *StringsNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (w *StringsNotifyWatcher) Report(ctx context.Context) map[string]any {
 	return map[string]any{
 		"type": "StringsNotifyWatcher",
@@ -224,4 +231,11 @@ func (w *MultiWatcher[T]) Err() error {
 
 func (w *MultiWatcher[T]) Changes() <-chan T {
 	return w.changes
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *MultiWatcher[T]) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

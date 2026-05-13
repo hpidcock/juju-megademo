@@ -23,6 +23,13 @@ func (w *mockWatcher) Changes() watcher.NotifyChannel {
 	return w.changes
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *mockWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (w *mockWatcher) Kill() {}
 
 func (w *mockWatcher) Wait() error {

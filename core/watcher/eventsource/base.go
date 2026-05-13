@@ -5,6 +5,7 @@ package eventsource
 
 import (
 	"context"
+	"sync"
 
 	"github.com/juju/collections/transform"
 	"gopkg.in/tomb.v2"
@@ -12,6 +13,7 @@ import (
 	"github.com/juju/juju/core/changestream"
 	"github.com/juju/juju/core/database"
 	"github.com/juju/juju/core/logger"
+	coretrace "github.com/juju/juju/core/trace"
 )
 
 // BaseWatcher encapsulates members common to all EventQueue-based watchers.
@@ -22,6 +24,11 @@ type BaseWatcher struct {
 
 	watchableDB changestream.WatchableDB
 	logger      logger.Logger
+
+	// mu guards lastTraceID and lastSpanID.
+	mu          sync.Mutex
+	lastTraceID string
+	lastSpanID  string
 }
 
 // NewBaseWatcher returns a BaseWatcher constructed from the arguments.
@@ -30,6 +37,57 @@ func NewBaseWatcher(watchableDB changestream.WatchableDB, logger logger.Logger) 
 		watchableDB: watchableDB,
 		logger:      logger,
 	}
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *BaseWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
+}
+
+// setLastTrace caches the trace context from a batch of events.
+// If all events share the same non-empty TraceID, that ID and the
+// SpanID of the last event in the batch are stored. If TraceIDs
+// differ across the batch or all are empty, lastTraceID is cleared.
+func (w *BaseWatcher) setLastTrace(
+	events []changestream.ChangeEvent,
+) {
+	if len(events) == 0 {
+		return
+	}
+	var traceID, spanID string
+	for _, e := range events {
+		t := e.TraceID()
+		s := e.SpanID()
+		if t == "" {
+			continue
+		}
+		if traceID == "" {
+			traceID = t
+			spanID = s
+		} else if traceID != t {
+			// Mixed trace IDs — clear and bail.
+			w.mu.Lock()
+			w.lastTraceID = ""
+			w.lastSpanID = ""
+			w.mu.Unlock()
+			return
+		} else {
+			// Same trace ID — update to most recent spanID.
+			spanID = s
+		}
+	}
+	w.mu.Lock()
+	w.lastTraceID = traceID
+	w.lastSpanID = spanID
+	w.mu.Unlock()
 }
 
 // Kill (worker.Worker) kills the watcher via its tomb.

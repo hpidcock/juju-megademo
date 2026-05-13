@@ -4,6 +4,8 @@
 package watcher
 
 import (
+	"context"
+
 	"github.com/juju/worker/v5"
 	"github.com/juju/worker/v5/catacomb"
 )
@@ -72,4 +74,11 @@ func (w *normaliseWatcher) Wait() error {
 
 func (w *normaliseWatcher) Changes() <-chan struct{} {
 	return w.ch
+}
+
+// ChangeContext implements Watcher.
+func (w *normaliseWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

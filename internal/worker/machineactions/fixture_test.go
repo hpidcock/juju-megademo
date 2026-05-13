@@ -5,6 +5,8 @@
 package machineactions_test
 
 import (
+	"context"
+
 	"github.com/juju/names/v6"
 	"github.com/juju/worker/v5"
 	"github.com/juju/worker/v5/workertest"
@@ -45,6 +47,13 @@ func newStubWatcher(watcherSendInvalidValues bool) *stubWatcher {
 // Changes is part of the watcher.StringsWatcher interface.
 func (stubWatcher *stubWatcher) Changes() watcher.StringsChannel {
 	return stubWatcher.changes
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *stubWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }
 
 var (

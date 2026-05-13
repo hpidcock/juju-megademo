@@ -4,6 +4,7 @@
 package provisioner
 
 import (
+	"context"
 	"time"
 
 	"gopkg.in/tomb.v2"
@@ -56,6 +57,14 @@ func (w *machineErrorRetry) Err() error {
 // Changes returns the event channel for the machineErrorRetry watcher.
 func (w *machineErrorRetry) Changes() <-chan struct{} {
 	return w.out
+}
+
+// ChangeContext implements watcher.Watcher. This watcher is a simple
+// poller with no changestream context, so parent is returned unchanged.
+func (w *machineErrorRetry) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }
 
 // ErrorRetryWaitDelay is the poll time currently used to trigger the watcher.

@@ -636,6 +636,8 @@ type EntitiesVersion struct {
 // NotifyWatchResult holds a NotifyWatcher id and an error (if any).
 type NotifyWatchResult struct {
 	NotifyWatcherId string
+	TraceID         string `json:"trace-id,omitempty"`
+	SpanID          string `json:"span-id,omitempty"`
 	Error           *Error `json:"error,omitempty"`
 }
 
@@ -650,6 +652,8 @@ type NotifyWatchResults struct {
 type StringsWatchResult struct {
 	StringsWatcherId string   `json:"watcher-id"`
 	Changes          []string `json:"changes,omitempty"`
+	TraceID          string   `json:"trace-id,omitempty"`
+	SpanID           string   `json:"span-id,omitempty"`
 	Error            *Error   `json:"error,omitempty"`
 }
 
@@ -665,6 +669,8 @@ type EntitiesWatchResult struct {
 	// Note legacy serialization tag.
 	EntitiesWatcherId string   `json:"watcher-id"`
 	Changes           []string `json:"changes,omitempty"`
+	TraceID           string   `json:"trace-id,omitempty"`
+	SpanID            string   `json:"span-id,omitempty"`
 	Error             *Error   `json:"error,omitempty"`
 }
 
@@ -701,6 +707,8 @@ type RelationUnitsChange struct {
 type RelationUnitsWatchResult struct {
 	RelationUnitsWatcherId string              `json:"watcher-id"`
 	Changes                RelationUnitsChange `json:"changes"`
+	TraceID                string              `json:"trace-id,omitempty"`
+	SpanID                 string              `json:"span-id,omitempty"`
 	Error                  *Error              `json:"error,omitempty"`
 }
 
@@ -748,6 +756,8 @@ type RelationApplication struct {
 type MachineStorageIdsWatchResult struct {
 	MachineStorageIdsWatcherId string             `json:"watcher-id"`
 	Changes                    []MachineStorageId `json:"changes"`
+	TraceID                    string             `json:"trace-id,omitempty"`
+	SpanID                     string             `json:"span-id,omitempty"`
 	Error                      *Error             `json:"error,omitempty"`
 }
 

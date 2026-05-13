@@ -714,6 +714,13 @@ func (w *stubWatcher) Changes() <-chan watcher.MigrationStatus {
 	return w.changes
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *stubWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func newStubAgent() *stubAgent {
 	return &stubAgent{
 		configChanged: make(chan bool),

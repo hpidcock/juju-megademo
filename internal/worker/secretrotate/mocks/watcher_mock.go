@@ -10,6 +10,7 @@
 package mocks
 
 import (
+	context "context"
 	reflect "reflect"
 
 	watcher "github.com/juju/juju/core/watcher"
@@ -37,6 +38,44 @@ func NewMockSecretTriggerWatcher(ctrl *gomock.Controller) *MockSecretTriggerWatc
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockSecretTriggerWatcher) EXPECT() *MockSecretTriggerWatcherMockRecorder {
 	return m.recorder
+}
+
+// ChangeContext mocks base method.
+func (m *MockSecretTriggerWatcher) ChangeContext(arg0 context.Context) context.Context {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChangeContext", arg0)
+	ret0, _ := ret[0].(context.Context)
+	return ret0
+}
+
+// ChangeContext indicates an expected call of ChangeContext.
+func (mr *MockSecretTriggerWatcherMockRecorder) ChangeContext(arg0 any) *MockSecretTriggerWatcherChangeContextCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChangeContext", reflect.TypeOf((*MockSecretTriggerWatcher)(nil).ChangeContext), arg0)
+	return &MockSecretTriggerWatcherChangeContextCall{Call: call}
+}
+
+// MockSecretTriggerWatcherChangeContextCall wrap *gomock.Call
+type MockSecretTriggerWatcherChangeContextCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSecretTriggerWatcherChangeContextCall) Return(arg0 context.Context) *MockSecretTriggerWatcherChangeContextCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSecretTriggerWatcherChangeContextCall) Do(f func(context.Context) context.Context) *MockSecretTriggerWatcherChangeContextCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSecretTriggerWatcherChangeContextCall) DoAndReturn(f func(context.Context) context.Context) *MockSecretTriggerWatcherChangeContextCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // Changes mocks base method.

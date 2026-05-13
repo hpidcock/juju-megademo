@@ -4,6 +4,8 @@
 package machiner
 
 import (
+	"context"
+
 	"github.com/juju/errors"
 	"github.com/juju/worker/v5"
 	"github.com/juju/worker/v5/catacomb"
@@ -98,4 +100,13 @@ func (w *mergedNotifyWatcher) Wait() error {
 
 func (w *mergedNotifyWatcher) Changes() <-chan struct{} {
 	return w.changes
+}
+
+// ChangeContext implements watcher.Watcher. This watcher merges two
+// notify streams and has no changestream context, so parent is
+// returned unchanged.
+func (w *mergedNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

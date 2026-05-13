@@ -136,6 +136,8 @@ func (w *NotifyWatcher) loop() error {
 				continue
 			}
 
+			w.setLastTrace(changes)
+
 			// We have changes. Tick over to dispatch mode.
 			out = w.out
 		case out <- struct{}{}:

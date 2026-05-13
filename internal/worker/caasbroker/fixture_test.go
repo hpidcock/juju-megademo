@@ -208,6 +208,13 @@ func (w *notifyWatcher) Changes() watcher.NotifyChannel {
 	return w.changes
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *notifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 // newModelConfig returns an environment config map with the supplied attrs
 // (on top of some default set), or fails the test.
 func newModelConfig(c *tc.C, extraAttrs jujutesting.Attrs) map[string]any {

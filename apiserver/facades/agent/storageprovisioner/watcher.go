@@ -118,6 +118,14 @@ func (w *stringSourcedWatcher[T]) Wait() error {
 	return w.catacomb.Wait()
 }
 
+// ChangeContext implements watcher.Watcher. This watcher does not
+// carry trace context, so the parent is returned unchanged.
+func (w *stringSourcedWatcher[T]) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 // machineStorageIdsWatcher defines the API wrapping a [corewatcher.MachineStorageIDsWatcher]
 // watching machine/storage attachments. This watcher notifies about storage
 // entities (volumes/filesystems) being attached to and detached from machines.

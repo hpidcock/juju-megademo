@@ -19,6 +19,7 @@ import (
 	"github.com/juju/juju/core/migration"
 	"github.com/juju/juju/core/secrets"
 	"github.com/juju/juju/core/status"
+	coretrace "github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/watcher"
 	internallogger "github.com/juju/juju/internal/logger"
 	"github.com/juju/juju/rpc"
@@ -187,6 +188,9 @@ func (w *commonWatcher) Wait() error {
 // It does not send content for those changes.
 type notifyWatcher struct {
 	commonWatcher
+	mu              sync.Mutex
+	lastTraceID     string
+	lastSpanID      string
 	caller          base.APICaller
 	notifyWatcherId string
 	out             chan struct{}
@@ -205,8 +209,7 @@ func NewNotifyWatcher(caller base.APICaller, result params.NotifyWatchResult) wa
 }
 
 func (w *notifyWatcher) loop() error {
-	// No results for this watcher type.
-	w.newResult = func() any { return nil }
+	w.newResult = func() any { return new(params.NotifyWatchResult) }
 	w.call = makeWatcherAPICaller(w.caller, "NotifyWatcher", w.notifyWatcherId)
 	w.commonWatcher.init()
 	go w.commonLoop()
@@ -219,11 +222,17 @@ func (w *notifyWatcher) loop() error {
 		case <-w.tomb.Dying():
 			return nil
 		}
-		if _, ok := <-w.in; !ok {
+		data, ok := <-w.in
+		if !ok {
 			// The tomb is already killed with the correct
 			// error at this point, so just return.
 			return nil
 		}
+		result := data.(*params.NotifyWatchResult)
+		w.mu.Lock()
+		w.lastTraceID = result.TraceID
+		w.lastSpanID = result.SpanID
+		w.mu.Unlock()
 	}
 }
 
@@ -233,10 +242,26 @@ func (w *notifyWatcher) Changes() <-chan struct{} {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *notifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
+}
+
 // stringsWatcher will send events when something changes.
 // The content of the changes is a list of strings.
 type stringsWatcher struct {
 	commonWatcher
+	mu               sync.Mutex
+	lastTraceID      string
+	lastSpanID       string
 	caller           base.APICaller
 	stringsWatcherId string
 	out              chan []string
@@ -275,7 +300,12 @@ func (w *stringsWatcher) loop(initialChanges []string) error {
 			// at this point, so just return.
 			return nil
 		}
-		changes = data.(*params.StringsWatchResult).Changes
+		result := data.(*params.StringsWatchResult)
+		w.mu.Lock()
+		w.lastTraceID = result.TraceID
+		w.lastSpanID = result.SpanID
+		w.mu.Unlock()
+		changes = result.Changes
 	}
 }
 
@@ -285,11 +315,27 @@ func (w *stringsWatcher) Changes() <-chan []string {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *stringsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
+}
+
 // relationUnitsWatcher will sends notifications of units entering and
 // leaving the scope of a RelationUnit, and changes to the settings of
 // those units known to have entered.
 type relationUnitsWatcher struct {
 	commonWatcher
+	mu                     sync.Mutex
+	lastTraceID            string
+	lastSpanID             string
 	caller                 base.APICaller
 	logger                 corelogger.Logger
 	relationUnitsWatcherId string
@@ -352,7 +398,12 @@ func (w *relationUnitsWatcher) loop(initialChanges params.RelationUnitsChange) e
 			// at this point, so just return.
 			return nil
 		}
-		changes = copyRelationUnitsChanged(data.(*params.RelationUnitsWatchResult).Changes)
+		result := data.(*params.RelationUnitsWatchResult)
+		w.mu.Lock()
+		w.lastTraceID = result.TraceID
+		w.lastSpanID = result.SpanID
+		w.mu.Unlock()
+		changes = copyRelationUnitsChanged(result.Changes)
 	}
 }
 
@@ -361,6 +412,19 @@ func (w *relationUnitsWatcher) loop(initialChanges params.RelationUnitsChange) e
 // holds the initial state of the relation in its Changed field.
 func (w *relationUnitsWatcher) Changes() watcher.RelationUnitsChannel {
 	return w.out
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *relationUnitsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
 }
 
 // RemoteRelationWatcher is a worker that emits remote relation change
@@ -376,6 +440,9 @@ type RemoteRelationWatcher = watcher.Watcher[params.RemoteRelationChangeEvent]
 // need to call back to get the settings values.
 type remoteRelationWatcher struct {
 	commonWatcher
+	mu                      sync.Mutex
+	lastTraceID             string
+	lastSpanID              string
 	caller                  base.APICaller
 	logger                  corelogger.Logger
 	remoteRelationWatcherId string
@@ -431,6 +498,10 @@ func (w *remoteRelationWatcher) loop(initialChange params.RemoteRelationChangeEv
 		if result.Error != nil {
 			return errors.Trace(result.Error)
 		}
+		w.mu.Lock()
+		w.lastTraceID = result.TraceID
+		w.lastSpanID = result.SpanID
+		w.mu.Unlock()
 		change = result.Changes
 	}
 }
@@ -439,6 +510,19 @@ func (w *remoteRelationWatcher) loop(initialChange params.RemoteRelationChangeEv
 // relation units.
 func (w *remoteRelationWatcher) Changes() <-chan params.RemoteRelationChangeEvent {
 	return w.out
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *remoteRelationWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
 }
 
 // SettingsGetter is a callback function the remote relation
@@ -580,10 +664,20 @@ func (w *remoteRelationCompatWatcher) Changes() <-chan params.RemoteRelationChan
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *remoteRelationCompatWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 // relationStatusWatcher will sends notifications of changes to
 // relation life and suspended status.
 type relationStatusWatcher struct {
 	commonWatcher
+	mu                      sync.Mutex
+	lastTraceID             string
+	lastSpanID              string
 	caller                  base.APICaller
 	relationStatusWatcherId string
 	out                     chan []watcher.RelationStatusChange
@@ -653,7 +747,12 @@ func (w *relationStatusWatcher) loop(initialChanges []params.RelationLifeSuspend
 				// at this point, so just return.
 				return nil
 			}
-			newChanges := copyChanges(data.(*params.RelationLifeSuspendedStatusWatchResult).Changes)
+			result := data.(*params.RelationLifeSuspendedStatusWatchResult)
+			w.mu.Lock()
+			w.lastTraceID = result.TraceID
+			w.lastSpanID = result.SpanID
+			w.mu.Unlock()
+			newChanges := copyChanges(result.Changes)
 			changes = w.mergeChanges(changes, newChanges)
 			out = w.out
 		case out <- changes:
@@ -670,9 +769,25 @@ func (w *relationStatusWatcher) Changes() watcher.RelationStatusChannel {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *relationStatusWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
+}
+
 // offerStatusWatcher will send notifications of changes to offer status.
 type offerStatusWatcher struct {
 	commonWatcher
+	mu                   sync.Mutex
+	lastTraceID          string
+	lastSpanID           string
 	caller               base.APICaller
 	offerStatusWatcherId string
 	out                  chan []watcher.OfferStatusChange
@@ -745,7 +860,12 @@ func (w *offerStatusWatcher) loop(initialChanges []params.OfferStatusChange) err
 				// at this point, so just return.
 				return nil
 			}
-			newChanges := copyChanges(data.(*params.OfferStatusWatchResult).Changes)
+			result := data.(*params.OfferStatusWatchResult)
+			w.mu.Lock()
+			w.lastTraceID = result.TraceID
+			w.lastSpanID = result.SpanID
+			w.mu.Unlock()
+			newChanges := copyChanges(result.Changes)
 			changes = w.mergeChanges(changes, newChanges)
 			out = w.out
 		case out <- changes:
@@ -762,11 +882,27 @@ func (w *offerStatusWatcher) Changes() watcher.OfferStatusChannel {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *offerStatusWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
+}
+
 // machineAttachmentsWatcher will sends notifications of units entering and
 // leaving the scope of a MachineStorageId, and changes to the settings of
 // those units known to have entered.
 type machineAttachmentsWatcher struct {
 	commonWatcher
+	mu                          sync.Mutex
+	lastTraceID                 string
+	lastSpanID                  string
 	caller                      base.APICaller
 	machineAttachmentsWatcherId string
 	out                         chan []watcher.MachineStorageID
@@ -837,7 +973,12 @@ func (w *machineAttachmentsWatcher) loop(facade string, initialChanges []params.
 			// at this point, so just return.
 			return nil
 		}
-		changes = copyMachineStorageIds(data.(*params.MachineStorageIdsWatchResult).Changes)
+		result := data.(*params.MachineStorageIdsWatchResult)
+		w.mu.Lock()
+		w.lastTraceID = result.TraceID
+		w.lastSpanID = result.SpanID
+		w.mu.Unlock()
+		changes = copyMachineStorageIds(result.Changes)
 	}
 }
 
@@ -845,6 +986,19 @@ func (w *machineAttachmentsWatcher) loop(facade string, initialChanges []params.
 // storage entity attachments which have changed.
 func (w *machineAttachmentsWatcher) Changes() watcher.MachineStorageIDsChannel {
 	return w.out
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *machineAttachmentsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
 }
 
 // NewMigrationStatusWatcher takes the NotifyWatcherId returns by the
@@ -917,13 +1071,23 @@ func (w *migrationStatusWatcher) Changes() <-chan watcher.MigrationStatus {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *migrationStatusWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 // secretsTriggerWatcher will send notifications of changes to secret trigger times.
 type secretsTriggerWatcher struct {
 	commonWatcher
-	caller    base.APICaller
-	apiFacade string
-	watcherId string
-	out       chan []watcher.SecretTriggerChange
+	mu          sync.Mutex
+	lastTraceID string
+	lastSpanID  string
+	caller      base.APICaller
+	apiFacade   string
+	watcherId   string
+	out         chan []watcher.SecretTriggerChange
 }
 
 // NewSecretsTriggerWatcher returns a new secrets trigger watcher.
@@ -997,7 +1161,12 @@ func (w *secretsTriggerWatcher) loop(initialChanges []params.SecretTriggerChange
 				// at this point, so just return.
 				return nil
 			}
-			newChanges := copyChanges(data.(*params.SecretTriggerWatchResult).Changes)
+			result := data.(*params.SecretTriggerWatchResult)
+			w.mu.Lock()
+			w.lastTraceID = result.TraceID
+			w.lastSpanID = result.SpanID
+			w.mu.Unlock()
+			newChanges := copyChanges(result.Changes)
 			changes = w.mergeChanges(changes, newChanges)
 			out = w.out
 		case out <- changes:
@@ -1014,12 +1183,28 @@ func (w *secretsTriggerWatcher) Changes() watcher.SecretTriggerChannel {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *secretsTriggerWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
+}
+
 // secretBackendRotateWatcher will send notifications of changes to secret trigger times.
 type secretBackendRotateWatcher struct {
 	commonWatcher
-	caller    base.APICaller
-	watcherId string
-	out       chan []watcher.SecretBackendRotateChange
+	mu          sync.Mutex
+	lastTraceID string
+	lastSpanID  string
+	caller      base.APICaller
+	watcherId   string
+	out         chan []watcher.SecretBackendRotateChange
 }
 
 // NewSecretBackendRotateWatcher returns a new secret backend rotate watcher.
@@ -1087,7 +1272,12 @@ func (w *secretBackendRotateWatcher) loop(initialChanges []params.SecretBackendR
 				// at this point, so just return.
 				return nil
 			}
-			newChanges := copyChanges(data.(*params.SecretBackendRotateWatchResult).Changes)
+			result := data.(*params.SecretBackendRotateWatchResult)
+			w.mu.Lock()
+			w.lastTraceID = result.TraceID
+			w.lastSpanID = result.SpanID
+			w.mu.Unlock()
+			newChanges := copyChanges(result.Changes)
 			changes = w.mergeChanges(changes, newChanges)
 			out = w.out
 		case out <- changes:
@@ -1104,12 +1294,28 @@ func (w *secretBackendRotateWatcher) Changes() watcher.SecretBackendRotateChanne
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *secretBackendRotateWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
+}
+
 // SecretsRevisionWatcher will send notifications of changes to secret revisions.
 type SecretsRevisionWatcher struct {
 	commonWatcher
-	caller    base.APICaller
-	watcherId string
-	out       chan []watcher.SecretRevisionChange
+	mu          sync.Mutex
+	lastTraceID string
+	lastSpanID  string
+	caller      base.APICaller
+	watcherId   string
+	out         chan []watcher.SecretRevisionChange
 }
 
 // NewSecretsRevisionWatcher returns a watcher notifying of changes to
@@ -1179,7 +1385,12 @@ func (w *SecretsRevisionWatcher) loop(initialChanges []params.SecretRevisionChan
 				// at this point, so just return.
 				return nil
 			}
-			newChanges := copyChanges(data.(*params.SecretRevisionWatchResult).Changes)
+			result := data.(*params.SecretRevisionWatchResult)
+			w.mu.Lock()
+			w.lastTraceID = result.TraceID
+			w.lastSpanID = result.SpanID
+			w.mu.Unlock()
+			newChanges := copyChanges(result.Changes)
 			changes = w.mergeChanges(changes, newChanges)
 			out = w.out
 		case out <- changes:
@@ -1194,4 +1405,17 @@ func (w *SecretsRevisionWatcher) loop(initialChanges []params.SecretRevisionChan
 // values of these attributes.
 func (w *SecretsRevisionWatcher) Changes() watcher.SecretRevisionChannel {
 	return w.out
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *SecretsRevisionWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	w.mu.Lock()
+	traceID, spanID := w.lastTraceID, w.lastSpanID
+	w.mu.Unlock()
+	if traceID == "" {
+		return parent
+	}
+	return coretrace.WithTraceScope(parent, traceID, spanID, 0)
 }

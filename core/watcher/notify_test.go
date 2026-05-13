@@ -150,6 +150,12 @@ func (tnw *testNotifyWatcher) Changes() <-chan struct{} {
 	return tnw.changes
 }
 
+func (tnw *testNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (tnw *testNotifyWatcher) Kill() {
 	tnw.mu.Lock()
 	tnw.tomb.Kill(tnw.stopError)

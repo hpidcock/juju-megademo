@@ -58,6 +58,13 @@ var missingVolumeAttachmentId = params.MachineStorageId{
 
 type mockWatcher struct{}
 
+// ChangeContext implements watcher.Watcher.
+func (mockWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (mockWatcher) Kill()       {}
 func (mockWatcher) Wait() error { return nil }
 

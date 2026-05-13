@@ -88,6 +88,13 @@ func (mock *mockWatcher) Changes() watcher.NotifyChannel {
 	return mock.changes
 }
 
+// ChangeContext implements watcher.Watcher.
+func (mock *mockWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 // checkCalls checks that all the supplied call names were invoked
 // in the supplied order, and that every one was passed [validUUID].
 func checkCalls(c *tc.C, stub *testhelpers.Stub, names ...string) {

@@ -1472,6 +1472,13 @@ func (w *mockWatcher) Changes() watcher.NotifyChannel {
 	return w.changes
 }
 
+// ChangeContext implements watcher.Watcher.
+func (w *mockWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 type stubConnection struct {
 	c *tc.C
 	api.Connection

@@ -4,6 +4,7 @@
 package watchertest
 
 import (
+	"context"
 	"time"
 
 	"github.com/juju/collections/set"
@@ -30,6 +31,13 @@ func NewMockStringsWatcher(ch <-chan []string) *MockStringsWatcher {
 
 func (w *MockStringsWatcher) Changes() <-chan []string {
 	return w.ch
+}
+
+// ChangeContext implements watcher.Watcher.
+func (w *MockStringsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }
 
 func (w *MockStringsWatcher) Stop() error {

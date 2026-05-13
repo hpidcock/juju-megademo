@@ -144,6 +144,12 @@ func (tsw *testStringsWatcher) Changes() <-chan []string {
 	return tsw.changes
 }
 
+func (tsw *testStringsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 func (tsw *testStringsWatcher) Kill() {
 	tsw.mu.Lock()
 	tsw.tomb.Kill(tsw.stopError)

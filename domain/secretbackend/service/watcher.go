@@ -95,3 +95,12 @@ func (w *secretBackendRotateWatcher) Kill() {
 func (w *secretBackendRotateWatcher) Wait() error {
 	return w.catacomb.Wait()
 }
+
+// ChangeContext implements watcher.Watcher. This watcher wraps a
+// source watcher and has no direct changestream context, so parent
+// is returned unchanged.
+func (w *secretBackendRotateWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}

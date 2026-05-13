@@ -4,6 +4,8 @@
 package testing
 
 import (
+	"context"
+
 	"github.com/juju/worker/v5"
 	"github.com/juju/worker/v5/workertest"
 
@@ -42,4 +44,12 @@ func (w *FakeNotifyWatcher) Err() error {
 // Changes is part of the state.NotifyWatcher interface.
 func (w *FakeNotifyWatcher) Changes() <-chan struct{} {
 	return w.C
+}
+
+// ChangeContext implements watcher.Watcher. This fake watcher has no
+// changestream context, so parent is returned unchanged.
+func (w *FakeNotifyWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
 }

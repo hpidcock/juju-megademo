@@ -354,6 +354,8 @@ type SecretTriggerChange struct {
 type SecretTriggerWatchResult struct {
 	WatcherId string                `json:"watcher-id"`
 	Changes   []SecretTriggerChange `json:"changes"`
+	TraceID   string                `json:"trace-id,omitempty"`
+	SpanID    string                `json:"span-id,omitempty"`
 	Error     *Error                `json:"error,omitempty"`
 }
 
@@ -513,6 +515,8 @@ type SecretBackendRotateChange struct {
 type SecretBackendRotateWatchResult struct {
 	WatcherId string                      `json:"watcher-id"`
 	Changes   []SecretBackendRotateChange `json:"changes"`
+	TraceID   string                      `json:"trace-id,omitempty"`
+	SpanID    string                      `json:"span-id,omitempty"`
 	Error     *Error                      `json:"error,omitempty"`
 }
 
@@ -609,6 +613,8 @@ type SecretRevisionChange struct {
 type SecretRevisionWatchResult struct {
 	WatcherId string                 `json:"watcher-id"`
 	Changes   []SecretRevisionChange `json:"changes"`
+	TraceID   string                 `json:"trace-id,omitempty"`
+	SpanID    string                 `json:"span-id,omitempty"`
 	Error     *Error                 `json:"error,omitempty"`
 }
 

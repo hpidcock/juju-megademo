@@ -155,4 +155,13 @@ func (w *relationUnitsWatcher) Changes() <-chan params.RelationUnitsChange {
 	return w.out
 }
 
+// ChangeContext implements watcher.Watcher. This watcher wraps a
+// domain watcher and has no direct changestream context, so parent
+// is returned unchanged.
+func (w *relationUnitsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}
+
 var _ common.RelationUnitsWatcher = &relationUnitsWatcher{}

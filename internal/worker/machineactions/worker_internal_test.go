@@ -120,3 +120,10 @@ type stringsWatcher struct {
 func (s *stringsWatcher) Changes() watcher.StringsChannel {
 	return s.changes
 }
+
+// ChangeContext implements watcher.Watcher.
+func (s *stringsWatcher) ChangeContext(
+	parent context.Context,
+) context.Context {
+	return parent
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/juju/juju/core/application"
 	corerelation "github.com/juju/juju/core/relation"
 	coresecrets "github.com/juju/juju/core/secrets"
+	coretrace "github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/unit"
 	corewatcher "github.com/juju/juju/core/watcher"
 	"github.com/juju/juju/domain/relation"
@@ -89,9 +90,19 @@ type srvNotifyWatcher struct {
 // Next returns when a change has occurred to the
 // entity being watched since the most recent call to Next
 // or the Watch call that created the NotifyWatcher.
-func (w *srvNotifyWatcher) Next(ctx context.Context) error {
+func (w *srvNotifyWatcher) Next(
+	ctx context.Context,
+) (params.NotifyWatchResult, error) {
 	_, err := internal.FirstResult[struct{}](ctx, w.watcher)
-	return errors.Trace(err)
+	if err != nil {
+		return params.NotifyWatchResult{}, errors.Trace(err)
+	}
+	traceCtx := w.watcher.ChangeContext(ctx)
+	traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
+	return params.NotifyWatchResult{
+		TraceID: traceID,
+		SpanID:  spanID,
+	}, nil
 }
 
 // srvStringsWatcher defines the API for methods on a StringsWatcher.
@@ -127,13 +138,19 @@ func newStringsWatcher(_ context.Context, context facade.ModelContext) (facade.F
 // Next returns when a change has occurred to an entity of the collection being
 // watched since the most recent call to Next or the Watch call that created the
 // srvStringsWatcher.
-func (w *srvStringsWatcher) Next(ctx context.Context) (params.StringsWatchResult, error) {
+func (w *srvStringsWatcher) Next(
+	ctx context.Context,
+) (params.StringsWatchResult, error) {
 	changes, err := internal.FirstResult[[]string](ctx, w.watcher)
 	if err != nil {
 		return params.StringsWatchResult{}, errors.Trace(err)
 	}
+	traceCtx := w.watcher.ChangeContext(ctx)
+	traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 	return params.StringsWatchResult{
 		Changes: changes,
+		TraceID: traceID,
+		SpanID:  spanID,
 	}, nil
 }
 
@@ -169,13 +186,19 @@ func newRelationUnitsWatcher(_ context.Context, context facade.ModelContext) (fa
 // Next returns when a change has occurred to an entity of the collection being
 // watched since the most recent call to Next or the Watch call that created the
 // srvRelationUnitsWatcher.
-func (w *srvRelationUnitsWatcher) Next(ctx context.Context) (params.RelationUnitsWatchResult, error) {
+func (w *srvRelationUnitsWatcher) Next(
+	ctx context.Context,
+) (params.RelationUnitsWatchResult, error) {
 	changes, err := internal.FirstResult(ctx, w.watcher)
 	if err != nil {
 		return params.RelationUnitsWatchResult{}, errors.Trace(err)
 	}
+	traceCtx := w.watcher.ChangeContext(ctx)
+	traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 	return params.RelationUnitsWatchResult{
 		Changes: changes,
+		TraceID: traceID,
+		SpanID:  spanID,
 	}, nil
 }
 
@@ -295,6 +318,8 @@ func (w *srvRemoteRelationWatcher) Next(ctx context.Context) (params.RemoteRelat
 				}
 			}
 
+			traceCtx := w.watcher.ChangeContext(ctx)
+			traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 			return params.RemoteRelationWatchResult{
 				Changes: params.RemoteRelationChangeEvent{
 					RelationToken:           w.relationUUID.String(),
@@ -305,6 +330,8 @@ func (w *srvRemoteRelationWatcher) Next(ctx context.Context) (params.RemoteRelat
 					ApplicationSettings:     transform.Map(appSettings, func(k string, v string) (string, any) { return k, v }),
 					ChangedUnits:            changedUnitSettingsParams,
 				},
+				TraceID: traceID,
+				SpanID:  spanID,
 			}, nil
 		}
 	}
@@ -423,6 +450,8 @@ func (w *srvRelationStatusWatcher) Next(ctx context.Context) (params.RelationLif
 			}, nil
 		}
 
+		traceCtx := w.watcher.ChangeContext(ctx)
+		traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 		return params.RelationLifeSuspendedStatusWatchResult{
 			Changes: []params.RelationLifeSuspendedStatusChange{
 				{
@@ -432,6 +461,8 @@ func (w *srvRelationStatusWatcher) Next(ctx context.Context) (params.RelationLif
 					SuspendedReason: change.SuspendedReason,
 				},
 			},
+			TraceID: traceID,
+			SpanID:  spanID,
 		}, nil
 	}
 }
@@ -485,6 +516,8 @@ func (w *srvOfferStatusWatcher) Next(ctx context.Context) (params.OfferStatusWat
 			}, nil
 		}
 
+		traceCtx := w.watcher.ChangeContext(ctx)
+		traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 		return params.OfferStatusWatchResult{
 			Changes: []params.OfferStatusChange{
 				{
@@ -497,6 +530,8 @@ func (w *srvOfferStatusWatcher) Next(ctx context.Context) (params.OfferStatusWat
 					},
 				},
 			},
+			TraceID: traceID,
+			SpanID:  spanID,
 		}, nil
 	}
 }
@@ -543,7 +578,9 @@ func newEntitiesWatcher(_ context.Context, context facade.ModelContext) (facade.
 // Next returns when a change has occurred to an entity of the
 // collection being watched since the most recent call to Next
 // or the Watch call that created the srvEntitiesWatcher.
-func (w *srvEntitiesWatcher) Next(ctx context.Context) (params.EntitiesWatchResult, error) {
+func (w *srvEntitiesWatcher) Next(
+	ctx context.Context,
+) (params.EntitiesWatchResult, error) {
 	changes, err := internal.FirstResult[[]string](ctx, w.watcher)
 	if err != nil {
 		return params.EntitiesWatchResult{}, errors.Trace(err)
@@ -552,8 +589,12 @@ func (w *srvEntitiesWatcher) Next(ctx context.Context) (params.EntitiesWatchResu
 	if err != nil {
 		return params.EntitiesWatchResult{}, errors.Annotate(err, "cannot map changes")
 	}
+	traceCtx := w.watcher.ChangeContext(ctx)
+	traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 	return params.EntitiesWatchResult{
 		Changes: mapped,
+		TraceID: traceID,
+		SpanID:  spanID,
 	}, nil
 }
 
@@ -698,13 +739,19 @@ func newSecretsTriggerWatcher(_ context.Context, context facade.ModelContext) (f
 // Next returns when a change has occurred to an entity of the
 // collection being watched since the most recent call to Next
 // or the Watch call that created the srvSecretRotationWatcher.
-func (w *srvSecretTriggerWatcher) Next(ctx context.Context) (params.SecretTriggerWatchResult, error) {
+func (w *srvSecretTriggerWatcher) Next(
+	ctx context.Context,
+) (params.SecretTriggerWatchResult, error) {
 	changes, err := internal.FirstResult[[]corewatcher.SecretTriggerChange](ctx, w.watcher)
 	if err != nil {
 		return params.SecretTriggerWatchResult{}, errors.Trace(err)
 	}
+	traceCtx := w.watcher.ChangeContext(ctx)
+	traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 	return params.SecretTriggerWatchResult{
 		Changes: w.translateChanges(changes),
+		TraceID: traceID,
+		SpanID:  spanID,
 	}, nil
 }
 
@@ -751,13 +798,19 @@ func newSecretBackendsRotateWatcher(_ context.Context, context facade.ModelConte
 // Next returns when a change has occurred to an entity of the
 // collection being watched since the most recent call to Next
 // or the Watch call that created the srvSecretRotationWatcher.
-func (w *srvSecretBackendsRotateWatcher) Next(ctx context.Context) (params.SecretBackendRotateWatchResult, error) {
+func (w *srvSecretBackendsRotateWatcher) Next(
+	ctx context.Context,
+) (params.SecretBackendRotateWatchResult, error) {
 	changes, err := internal.FirstResult[[]corewatcher.SecretBackendRotateChange](ctx, w.watcher)
 	if err != nil {
 		return params.SecretBackendRotateWatchResult{}, errors.Trace(err)
 	}
+	traceCtx := w.watcher.ChangeContext(ctx)
+	traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 	return params.SecretBackendRotateWatchResult{
 		Changes: w.translateChanges(changes),
+		TraceID: traceID,
+		SpanID:  spanID,
 	}, nil
 }
 
@@ -814,7 +867,9 @@ func newSecretsRevisionWatcher(_ context.Context, context facade.ModelContext) (
 // Next returns when a change has occurred to an entity of the
 // collection being watched since the most recent call to Next
 // or the Watch call that created the srvSecretRotationWatcher.
-func (w *srvSecretsRevisionWatcher) Next(ctx context.Context) (params.SecretRevisionWatchResult, error) {
+func (w *srvSecretsRevisionWatcher) Next(
+	ctx context.Context,
+) (params.SecretRevisionWatchResult, error) {
 	changes, err := internal.FirstResult[[]string](ctx, w.watcher)
 	if err != nil {
 		return params.SecretRevisionWatchResult{}, errors.Trace(err)
@@ -823,8 +878,12 @@ func (w *srvSecretsRevisionWatcher) Next(ctx context.Context) (params.SecretRevi
 	if err != nil {
 		return params.SecretRevisionWatchResult{}, errors.Trace(err)
 	}
+	traceCtx := w.watcher.ChangeContext(ctx)
+	traceID, spanID, _, _ := coretrace.ScopeFromContext(traceCtx)
 	return params.SecretRevisionWatchResult{
 		Changes: ch,
+		TraceID: traceID,
+		SpanID:  spanID,
 	}, nil
 }
 

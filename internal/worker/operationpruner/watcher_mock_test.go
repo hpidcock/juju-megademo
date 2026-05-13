@@ -10,6 +10,7 @@
 package operationpruner
 
 import (
+	context "context"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -36,6 +37,44 @@ func NewMockStringsWatcher(ctrl *gomock.Controller) *MockStringsWatcher {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockStringsWatcher) EXPECT() *MockStringsWatcherMockRecorder {
 	return m.recorder
+}
+
+// ChangeContext mocks base method.
+func (m *MockStringsWatcher) ChangeContext(arg0 context.Context) context.Context {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChangeContext", arg0)
+	ret0, _ := ret[0].(context.Context)
+	return ret0
+}
+
+// ChangeContext indicates an expected call of ChangeContext.
+func (mr *MockStringsWatcherMockRecorder) ChangeContext(arg0 any) *MockStringsWatcherChangeContextCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChangeContext", reflect.TypeOf((*MockStringsWatcher)(nil).ChangeContext), arg0)
+	return &MockStringsWatcherChangeContextCall{Call: call}
+}
+
+// MockStringsWatcherChangeContextCall wrap *gomock.Call
+type MockStringsWatcherChangeContextCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockStringsWatcherChangeContextCall) Return(arg0 context.Context) *MockStringsWatcherChangeContextCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockStringsWatcherChangeContextCall) Do(f func(context.Context) context.Context) *MockStringsWatcherChangeContextCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockStringsWatcherChangeContextCall) DoAndReturn(f func(context.Context) context.Context) *MockStringsWatcherChangeContextCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // Changes mocks base method.
