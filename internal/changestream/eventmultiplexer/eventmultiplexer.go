@@ -5,6 +5,8 @@ package eventmultiplexer
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/juju/juju/core/changestream"
 	"github.com/juju/juju/core/database"
 	"github.com/juju/juju/core/logger"
+	"github.com/juju/juju/core/trace"
 )
 
 // ChangeSet represents a set of changes.
@@ -392,6 +395,7 @@ func (e *EventMultiplexer) dispatchSet(changeSet map[*subscription]ChangeSet) er
 	grp, ctx := errgroup.WithContext(e.catacomb.Context(context.Background()))
 
 	for sub, changes := range changeSet {
+		enriched := resolveTraceContext(ctx, changes)
 
 		grp.Go(func() error {
 			// Pass the context of the catacomb with the deadline to the
@@ -405,7 +409,7 @@ func (e *EventMultiplexer) dispatchSet(changeSet map[*subscription]ChangeSet) er
 			// and independent of each other, we don't want to stop any of them
 			// if just one of them fails. This includes the case where a
 			// subscription is killed while dispatching.
-			if err := sub.dispatch(ctx, changes); errors.Is(err, ErrUnsubscribing) {
+			if err := sub.dispatch(ctx, enriched); errors.Is(err, ErrUnsubscribing) {
 				// One subscription was being unsubscribed while we were
 				// dispatching changes. This is expected, so we just log it
 				// and move on. This is expected to happen, so we don't want
@@ -463,4 +467,118 @@ func (e *EventMultiplexer) unsubscribe(subID uint64, sub *subscription) {
 
 func (e *EventMultiplexer) scopedContext() (context.Context, context.CancelFunc) {
 	return context.WithCancel(e.catacomb.Context(context.Background()))
+}
+
+// tracedChange wraps a ChangeEvent and overrides its TraceID and SpanID.
+// It is used when a coalesced batch contains changes from multiple
+// transactions with different trace IDs. The whole batch is normalised
+// to a single fresh trace scope so downstream consumers see a coherent
+// view.
+type tracedChange struct {
+	changestream.ChangeEvent
+	traceID string
+	spanID  string
+}
+
+// TraceID returns the overridden trace ID.
+func (t tracedChange) TraceID() string { return t.traceID }
+
+// SpanID returns the overridden span ID.
+func (t tracedChange) SpanID() string { return t.spanID }
+
+// resolveTraceContext inspects the trace scopes of the changes destined
+// for a subscriber and returns an updated change set when the batch
+// contains mixed trace IDs.
+//
+// Rules:
+//   - If all TraceIDs are empty, the batch is returned unchanged.
+//   - If every non-empty TraceID is the same, the batch is returned
+//     unchanged.
+//   - If there are mixed TraceIDs, a fresh W3C trace ID is allocated,
+//     a span is opened, and AddLink is called for each distinct
+//     originating (traceID, spanID) pair. All changes are wrapped so
+//     downstream consumers see a coherent batch.
+//
+// txn_id ordering is not available on ChangeEvent; the last non-empty
+// spanID found in the slice is used as S_last.
+func resolveTraceContext(
+	ctx context.Context,
+	changes ChangeSet,
+) ChangeSet {
+	if len(changes) == 0 {
+		return changes
+	}
+	// Walk once to find the last non-empty scope (S_last) and whether
+	// there are any non-empty trace IDs at all.
+	var lastTraceID, lastSpanID string
+	for _, ch := range changes {
+		if ch.TraceID() != "" {
+			lastTraceID = ch.TraceID()
+			lastSpanID = ch.SpanID()
+		}
+	}
+	// All changes have empty trace IDs - nothing to do.
+	if lastTraceID == "" {
+		return changes
+	}
+	// Walk again to check whether the non-empty trace IDs are uniform.
+	firstID := ""
+	mixed := false
+	for _, ch := range changes {
+		id := ch.TraceID()
+		if id == "" {
+			continue
+		}
+		if firstID == "" {
+			firstID = id
+		} else if id != firstID {
+			mixed = true
+			break
+		}
+	}
+	if !mixed {
+		return changes
+	}
+	// Mixed trace IDs: allocate a fresh W3C trace ID.
+	freshID, err := generateW3CTraceID()
+	if err != nil {
+		// Best effort: if we cannot generate a fresh ID, return unchanged.
+		return changes
+	}
+	// Open a span for causal linking and record each distinct origin.
+	// If no real tracer is present in ctx, this is a no-op via NoopSpan.
+	_, span := trace.Start(ctx, "changestream.coalesced-dispatch")
+	defer span.End()
+	seen := make(map[string]struct{})
+	for _, ch := range changes {
+		if ch.TraceID() == "" {
+			continue
+		}
+		key := ch.TraceID() + "/" + ch.SpanID()
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			span.AddLink(ch.TraceID(), ch.SpanID())
+		}
+	}
+	// Wrap all changes with the fresh trace ID and S_last span ID so
+	// all downstream consumers see a coherent trace batch.
+	result := make(ChangeSet, len(changes))
+	for i, ch := range changes {
+		result[i] = tracedChange{
+			ChangeEvent: ch,
+			traceID:     freshID,
+			spanID:      lastSpanID,
+		}
+	}
+	return result
+}
+
+// generateW3CTraceID returns a fresh W3C-format trace ID:
+// 32 lower-case hex characters generated from crypto/rand.
+func generateW3CTraceID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

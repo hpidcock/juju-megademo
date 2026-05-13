@@ -4,6 +4,7 @@
 package eventmultiplexer
 
 import (
+	"context"
 	"sync"
 	stdtesting "testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/juju/juju/core/changestream"
 	changestreamtesting "github.com/juju/juju/core/changestream/testing"
 	"github.com/juju/juju/core/database"
+	coretrace "github.com/juju/juju/core/trace"
 	"github.com/juju/juju/core/testing"
 	loggertesting "github.com/juju/juju/internal/logger/testing"
 )
@@ -956,4 +958,152 @@ func (s *eventMultiplexerSuite) TestReportWithTopicRemovalAfterUnsubscribe(c *tc
 	})
 
 	workertest.CleanKill(c, queue)
+}
+
+// tracedChangeEvent is a change event with configurable trace
+// and span IDs for use in tests.
+type tracedChangeEvent struct {
+	changeEvent
+	traceID string
+	spanID  string
+}
+
+func (e tracedChangeEvent) TraceID() string { return e.traceID }
+func (e tracedChangeEvent) SpanID() string  { return e.spanID }
+
+// spyLink records a single AddLink invocation.
+type spyLink struct {
+	traceID string
+	spanID  string
+}
+
+// spySpan is a span that records AddLink calls.
+type spySpan struct {
+	coretrace.NoopSpan
+	links []spyLink
+}
+
+func (s *spySpan) AddLink(traceID, spanID string) {
+	s.links = append(s.links, spyLink{
+		traceID: traceID,
+		spanID:  spanID,
+	})
+}
+
+// spyTracer returns the fixed spySpan on every Start call
+// and reports itself as enabled so the production code uses it.
+type spyTracer struct {
+	span *spySpan
+}
+
+func (t *spyTracer) Start(
+	ctx context.Context,
+	_ string,
+	_ ...coretrace.Option,
+) (context.Context, coretrace.Span) {
+	return ctx, t.span
+}
+
+func (t *spyTracer) Enabled() bool { return true }
+
+type resolveTraceContextSuite struct{}
+
+func TestResolveTraceContextSuite(t *stdtesting.T) {
+	defer goleak.VerifyNone(t)
+	tc.Run(t, &resolveTraceContextSuite{})
+}
+
+func (s *resolveTraceContextSuite) TestEmptyTraceIDs(c *tc.C) {
+	changes := ChangeSet{
+		changeEvent{
+			ctype:   changestreamtesting.Create,
+			ns:      "foo",
+			changed: "1",
+		},
+		changeEvent{
+			ctype:   changestreamtesting.Update,
+			ns:      "foo",
+			changed: "2",
+		},
+	}
+	spy := &spySpan{}
+	ctx := coretrace.WithTracer(c.Context(), &spyTracer{span: spy})
+	result := resolveTraceContext(ctx, changes)
+	c.Check(result, tc.DeepEquals, changes)
+	c.Check(spy.links, tc.HasLen, 0)
+}
+
+func (s *resolveTraceContextSuite) TestUniformTraceIDs(c *tc.C) {
+	changes := ChangeSet{
+		tracedChangeEvent{
+			changeEvent: changeEvent{
+				ctype:   changestreamtesting.Create,
+				ns:      "foo",
+				changed: "1",
+			},
+			traceID: "aaaa",
+			spanID:  "1111",
+		},
+		tracedChangeEvent{
+			changeEvent: changeEvent{
+				ctype:   changestreamtesting.Update,
+				ns:      "foo",
+				changed: "2",
+			},
+			traceID: "aaaa",
+			spanID:  "2222",
+		},
+	}
+	spy := &spySpan{}
+	ctx := coretrace.WithTracer(c.Context(), &spyTracer{span: spy})
+	result := resolveTraceContext(ctx, changes)
+	c.Check(result, tc.DeepEquals, changes)
+	c.Check(spy.links, tc.HasLen, 0)
+}
+
+func (s *resolveTraceContextSuite) TestMixedTraceIDs(c *tc.C) {
+	changes := ChangeSet{
+		tracedChangeEvent{
+			changeEvent: changeEvent{
+				ctype:   changestreamtesting.Create,
+				ns:      "foo",
+				changed: "1",
+			},
+			traceID: "aaaa",
+			spanID:  "1111",
+		},
+		tracedChangeEvent{
+			changeEvent: changeEvent{
+				ctype:   changestreamtesting.Update,
+				ns:      "foo",
+				changed: "2",
+			},
+			traceID: "bbbb",
+			spanID:  "2222",
+		},
+	}
+	spy := &spySpan{}
+	ctx := coretrace.WithTracer(c.Context(), &spyTracer{span: spy})
+	result := resolveTraceContext(ctx, changes)
+	c.Assert(result, tc.HasLen, 2)
+	freshID := result[0].TraceID()
+	// Fresh W3C trace ID must be 32 lower-case hex characters.
+	c.Check(len(freshID), tc.Equals, 32)
+	c.Check(freshID, tc.Not(tc.Equals), "aaaa")
+	c.Check(freshID, tc.Not(tc.Equals), "bbbb")
+	// All results carry the same fresh trace ID.
+	c.Check(result[1].TraceID(), tc.Equals, freshID)
+	// Last non-empty spanID in the input slice is "2222".
+	c.Check(result[0].SpanID(), tc.Equals, "2222")
+	c.Check(result[1].SpanID(), tc.Equals, "2222")
+	// AddLink must be called once per distinct (traceID, spanID) pair.
+	c.Assert(spy.links, tc.HasLen, 2)
+	c.Check(spy.links[0], tc.DeepEquals, spyLink{
+		traceID: "aaaa",
+		spanID:  "1111",
+	})
+	c.Check(spy.links[1], tc.DeepEquals, spyLink{
+		traceID: "bbbb",
+		spanID:  "2222",
+	})
 }
