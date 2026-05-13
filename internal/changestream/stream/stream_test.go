@@ -1208,7 +1208,7 @@ func (s *streamSuite) TestReadChangesWithNoChanges(c *tc.C) {
 
 	s.insertNamespace(c, 1000, "foo")
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 
 	c.Assert(results, tc.HasLen, 0)
@@ -1227,7 +1227,7 @@ func (s *streamSuite) TestReadChangesWithOneChange(c *tc.C) {
 	}
 	s.insertChange(c, first)
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 
 	c.Assert(results, tc.HasLen, 1)
@@ -1251,7 +1251,7 @@ func (s *streamSuite) TestReadChangesWithMultipleSameChange(c *tc.C) {
 		s.insertChange(c, ch)
 	}
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 
 	c.Assert(results, tc.HasLen, 1)
@@ -1276,7 +1276,7 @@ func (s *streamSuite) TestReadChangesWithMultipleChanges(c *tc.C) {
 		changes[i] = ch
 	}
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 
 	c.Assert(results, tc.HasLen, 10)
@@ -1311,7 +1311,7 @@ func (s *streamSuite) TestReadChangesWithMultipleChangesGroupsCorrectly(c *tc.C)
 		changes[i] = ch
 	}
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 
 	c.Assert(results, tc.HasLen, 10)
@@ -1388,7 +1388,7 @@ func (s *streamSuite) TestReadChangesWithMultipleChangesInterweavedGroupsCorrect
 		changes[3] = ch
 	}
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 	c.Assert(results, tc.HasLen, 4, tc.Commentf("expected 4, received %v", len(results)))
 
@@ -1588,7 +1588,7 @@ func (s *streamSuite) TestReadChangesTraceIDAndSpanID(c *tc.C) {
 	)
 	c.Assert(err, tc.ErrorIsNil)
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 	c.Assert(results, tc.HasLen, 1)
 	c.Check(results[0].TraceID(), tc.Equals, "trace-abc")
@@ -1615,7 +1615,7 @@ func (s *streamSuite) TestTermTxnMinIDAndTxnMaxID(c *tc.C) {
 		c.Assert(err, tc.ErrorIsNil)
 	}
 
-	results, err := stream.readChanges()
+	results, err := stream.readChanges(0)
 	c.Assert(err, tc.ErrorIsNil)
 	c.Assert(results, tc.HasLen, 3)
 
@@ -1640,6 +1640,313 @@ func (s *streamSuite) TestTermTxnMinIDAndTxnMaxID(c *tc.C) {
 
 	c.Check(term.TxnMinID(), tc.Equals, int64(3))
 	c.Check(term.TxnMaxID(), tc.Equals, int64(7))
+}
+
+func (s *streamSuite) TestReadDebugStateRunning(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	ds, err := stream.readDebugState(c.Context())
+	c.Assert(err, tc.ErrorIsNil)
+	c.Check(ds.state, tc.Equals, "running")
+	c.Check(ds.stepTarget, tc.Equals, int64(0))
+}
+
+func (s *streamSuite) TestReadDebugStatePaused(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	_, err := s.DB().ExecContext(
+		c.Context(),
+		`UPDATE debug_change_stream SET state = 'paused' WHERE id = 1`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	ds, err := stream.readDebugState(c.Context())
+	c.Assert(err, tc.ErrorIsNil)
+	c.Check(ds.state, tc.Equals, "paused")
+}
+
+func (s *streamSuite) TestReadDebugStateStep(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	_, err := s.DB().ExecContext(
+		c.Context(),
+		`UPDATE debug_change_stream SET state = 'step', step_target = 42 WHERE id = 1`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	ds, err := stream.readDebugState(c.Context())
+	c.Assert(err, tc.ErrorIsNil)
+	c.Check(ds.state, tc.Equals, "step")
+	c.Check(ds.stepTarget, tc.Equals, int64(42))
+}
+
+func (s *streamSuite) TestWriteDebugPausedCAS(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	_, err := s.DB().ExecContext(
+		c.Context(),
+		`UPDATE debug_change_stream SET state = 'step', step_target = 99 WHERE id = 1`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	err = stream.writeDebugPaused(c.Context(), 99)
+	c.Assert(err, tc.ErrorIsNil)
+
+	var state string
+	err = s.DB().QueryRowContext(
+		c.Context(),
+		`SELECT state FROM debug_change_stream WHERE id = 1`,
+	).Scan(&state)
+	c.Assert(err, tc.ErrorIsNil)
+	c.Check(state, tc.Equals, "paused")
+}
+
+func (s *streamSuite) TestWriteDebugPausedCASIsNoopWhenStateChanged(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	// Default DB state is 'running', step_target = 0.
+	// WHERE state = 'step' AND step_target = 0 won't match.
+	err := stream.writeDebugPaused(c.Context(), 0)
+	c.Assert(err, tc.ErrorIsNil)
+
+	var state string
+	err = s.DB().QueryRowContext(
+		c.Context(),
+		`SELECT state FROM debug_change_stream WHERE id = 1`,
+	).Scan(&state)
+	c.Assert(err, tc.ErrorIsNil)
+	c.Check(state, tc.Equals, "running")
+}
+
+func (s *streamSuite) TestReadChangesWithStepTarget(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	stream := s.newNonRunningStream()
+
+	s.insertNamespace(c, 1000, "foo")
+
+	for range 3 {
+		s.insertChange(c, change{
+			id:   1000,
+			uuid: uuid.MustNewUUID().String(),
+		})
+	}
+
+	// Assign txn_ids 1, 2, 3 in insertion order.
+	rows, err := s.DB().QueryContext(
+		c.Context(),
+		`SELECT id FROM change_log ORDER BY id`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		c.Assert(rows.Scan(&id), tc.ErrorIsNil)
+		ids = append(ids, id)
+	}
+	c.Assert(rows.Close(), tc.ErrorIsNil)
+	for i, id := range ids {
+		_, err = s.DB().ExecContext(
+			c.Context(),
+			`UPDATE change_log SET txn_id = ? WHERE id = ?`,
+			int64(i+1), id,
+		)
+		c.Assert(err, tc.ErrorIsNil)
+	}
+
+	results, err := stream.readChanges(2)
+	c.Assert(err, tc.ErrorIsNil)
+	c.Assert(results, tc.HasLen, 2)
+	for _, r := range results {
+		c.Check(r.txnID <= 2, tc.IsTrue)
+	}
+
+	results, err = stream.readChanges(3)
+	c.Assert(err, tc.ErrorIsNil)
+	c.Assert(results, tc.HasLen, 3)
+}
+
+func (s *streamSuite) TestStreamHaltsWhenPaused(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	s.expectFileNotifyWatcher()
+	s.expectAnyAfterAnyTimes()
+	s.expectTimer()
+	s.expectClock()
+	s.expectMetrics()
+
+	_, err := s.DB().ExecContext(
+		c.Context(),
+		`UPDATE debug_change_stream SET state = 'paused' WHERE id = 1`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	s.insertNamespace(c, 1000, "foo")
+	s.insertChange(c, change{id: 1000, uuid: uuid.MustNewUUID().String()})
+
+	stream := New(
+		uuid.MustNewUUID().String(),
+		s.TxnRunner(),
+		s.FileNotifier,
+		s.clock,
+		s.metrics,
+		loggertesting.WrapCheckLog(c),
+	)
+	defer workertest.DirtyKill(c, stream)
+
+	select {
+	case <-stream.Terms():
+		c.Fatal("unexpected term received while paused")
+	case <-time.After(witnessChangeLongDuration):
+	}
+
+	workertest.CleanKill(c, stream)
+}
+
+func (s *streamSuite) TestStreamDispatchesUpToStepTargetThenPauses(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	s.expectFileNotifyWatcher()
+	s.expectAnyAfterAnyTimes()
+	s.expectTimer()
+	s.expectClock()
+	s.expectMetrics()
+
+	s.insertNamespace(c, 1000, "foo")
+	for range 3 {
+		s.insertChange(c, change{
+			id:   1000,
+			uuid: uuid.MustNewUUID().String(),
+		})
+	}
+
+	// Assign txn_ids 1, 2, 3 in insertion order.
+	rows, err := s.DB().QueryContext(
+		c.Context(),
+		`SELECT id FROM change_log ORDER BY id`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		c.Assert(rows.Scan(&id), tc.ErrorIsNil)
+		ids = append(ids, id)
+	}
+	c.Assert(rows.Close(), tc.ErrorIsNil)
+	for i, id := range ids {
+		_, err = s.DB().ExecContext(
+			c.Context(),
+			`UPDATE change_log SET txn_id = ? WHERE id = ?`,
+			int64(i+1), id,
+		)
+		c.Assert(err, tc.ErrorIsNil)
+	}
+
+	_, err = s.DB().ExecContext(
+		c.Context(),
+		`UPDATE debug_change_stream
+			SET state = 'step', step_target = 2
+			WHERE id = 1`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	stream := New(
+		uuid.MustNewUUID().String(),
+		s.TxnRunner(),
+		s.FileNotifier,
+		s.clock,
+		s.metrics,
+		loggertesting.WrapCheckLog(c),
+	)
+	defer workertest.DirtyKill(c, stream)
+
+	select {
+	case term := <-stream.Terms():
+		t := term.(*Term)
+		c.Check(len(t.Changes()) <= 2, tc.IsTrue)
+		c.Check(t.TxnMaxID() <= 2, tc.IsTrue)
+		term.Done(false, make(chan struct{}))
+	case <-c.Context().Done():
+		c.Fatal("timed out waiting for term")
+	}
+
+	// Poll until writeDebugPaused completes in the stream goroutine.
+	deadline := time.Now().Add(witnessChangeLongDuration)
+	var state string
+	for time.Now().Before(deadline) {
+		err = s.DB().QueryRowContext(
+			c.Context(),
+			`SELECT state FROM debug_change_stream WHERE id = 1`,
+		).Scan(&state)
+		c.Assert(err, tc.ErrorIsNil)
+		if state == "paused" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	c.Check(state, tc.Equals, "paused")
+
+	workertest.CleanKill(c, stream)
+}
+
+func (s *streamSuite) TestStreamResumesWhenRunning(c *tc.C) {
+	defer s.setupMocks(c).Finish()
+
+	s.expectFileNotifyWatcher()
+	s.expectAfterWithoutTermTimeout()
+	s.expectTimer()
+	s.expectClock()
+	s.expectMetrics()
+
+	_, err := s.DB().ExecContext(
+		c.Context(),
+		`UPDATE debug_change_stream SET state = 'paused' WHERE id = 1`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	s.insertNamespace(c, 1000, "foo")
+	s.insertChange(c, change{id: 1000, uuid: uuid.MustNewUUID().String()})
+
+	stream := New(
+		uuid.MustNewUUID().String(),
+		s.TxnRunner(),
+		s.FileNotifier,
+		s.clock,
+		s.metrics,
+		loggertesting.WrapCheckLog(c),
+	)
+	defer workertest.DirtyKill(c, stream)
+
+	select {
+	case <-stream.Terms():
+		c.Fatal("unexpected term while paused")
+	case <-time.After(witnessChangeShortDuration):
+	}
+
+	_, err = s.DB().ExecContext(
+		c.Context(),
+		`UPDATE debug_change_stream SET state = 'running' WHERE id = 1`,
+	)
+	c.Assert(err, tc.ErrorIsNil)
+
+	select {
+	case term := <-stream.Terms():
+		term.Done(false, make(chan struct{}))
+	case <-c.Context().Done():
+		c.Fatal("timed out waiting for term after resuming")
+	}
+
+	workertest.CleanKill(c, stream)
 }
 
 func (s *streamSuite) newNonRunningStream() *Stream {

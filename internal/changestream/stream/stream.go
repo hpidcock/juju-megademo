@@ -133,6 +133,10 @@ type Stream struct {
 	watermarksMutex       sync.Mutex
 	watermarks            []*termView
 	lastRecordedWatermark *termView
+
+	// debugMode is set when debug-mode change events are received.
+	// While false, readDebugState is never called.
+	debugMode bool
 }
 
 // New creates a new Stream.
@@ -248,6 +252,13 @@ func (s *Stream) loop() error {
 	// Report the begin state after the watermark has been created.
 	s.reportState(stateBegin)
 
+	// On startup, enter debug mode if the DB state is not 'running'.
+	// This makes restart behaviour deterministic.
+	if ds, err := s.readDebugState(ctx); err == nil &&
+		ds.state != "running" {
+		s.debugMode = true
+	}
+
 	var attempt int
 OUTER:
 	for {
@@ -313,8 +324,31 @@ OUTER:
 			watermarkTimer.Reset(jitter(defaultWatermarkInterval, 0.1))
 
 		default:
+			var stepTarget int64
+			if s.debugMode {
+				ds, err := s.readDebugState(ctx)
+				if err != nil {
+					if errors.Is(errors.Cause(err), context.Canceled) {
+						continue OUTER
+					}
+					return errors.Annotate(err, "reading debug state")
+				}
+				switch ds.state {
+				case "running":
+					s.debugMode = false
+				case "paused":
+					select {
+					case <-s.tomb.Dying():
+						return tomb.ErrDying
+					case <-s.clock.After(backOffStrategy(0, attempt)):
+						continue OUTER
+					}
+				case "step":
+					stepTarget = ds.stepTarget
+				}
+			}
 			begin := s.clock.Now().UTC()
-			changes, err := s.readChanges()
+			changes, err := s.readChanges(stepTarget)
 			if err != nil {
 				// If the context was canceled, we're unsure if it's because
 				// the worker is dying, or if the context was canceled because
@@ -453,6 +487,17 @@ OUTER:
 					upper: upper,
 				})
 
+				// After a step term completes, write 'paused' back
+				// using a CAS update to prevent lost-update races.
+				if stepTarget > 0 {
+					if err := s.writeDebugPaused(ctx, stepTarget); err != nil &&
+						!errors.Is(errors.Cause(err), context.Canceled) {
+						return errors.Annotate(
+							err, "writing debug pause state",
+						)
+					}
+				}
+
 				// If the resulting term change set is empty, then wait for
 				// the back-off strategy to complete before attempting to
 				// read changes again.
@@ -501,6 +546,33 @@ SELECT MAX(c.id), c.edit_type_id, n.namespace, c.changed,
 	GROUP BY c.namespace_id, c.changed
 	ORDER BY c.id;
 `
+
+	// selectStepQuery is selectQuery with an additional txn_id upper-bound
+	// predicate used during debug step mode.
+	selectStepQuery = `
+SELECT MAX(c.id), c.edit_type_id, n.namespace, c.changed,
+       c.created_at, c.txn_id, c.trace_id, c.span_id
+	FROM change_log c
+		JOIN change_log_edit_type t ON c.edit_type_id = t.id
+		JOIN change_log_namespace n ON c.namespace_id = n.id
+	WHERE c.id > ? AND c.txn_id <= ?
+	GROUP BY c.namespace_id, c.changed
+	ORDER BY c.id;
+`
+
+	// debugStateQuery reads the current debug state for this database.
+	debugStateQuery = `
+SELECT state, step_target FROM debug_change_stream LIMIT 1;
+`
+
+	// debugPauseQuery writes 'paused' back after a step completes.
+	// Uses a CAS-style WHERE clause to prevent lost-update races.
+	debugPauseQuery = `
+UPDATE debug_change_stream
+	SET state = 'paused',
+	    updated_at = STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW', 'utc')
+	WHERE state = 'step' AND step_target = ?;
+`
 )
 
 // Note: changestream.ChangeEvent could be optimized in the future to be a
@@ -541,15 +613,36 @@ func (e changeEvent) TraceID() string { return e.traceID }
 // SpanID returns the span ID associated with the change.
 func (e changeEvent) SpanID() string { return e.spanID }
 
-func (s *Stream) readChanges() ([]changeEvent, error) {
-	// As this is a self instantiated query, we don't have a root context to tie
-	// to, so we create a new one that's cancellable.
+// debugState holds the current debug state for the stream.
+type debugState struct {
+	state      string
+	stepTarget int64
+}
+
+func (s *Stream) readChanges(
+	stepTarget int64,
+) ([]changeEvent, error) {
+	// As this is a self instantiated query, we don't have a root context to
+	// tie to, so we create a new one that's cancellable.
 	ctx, cancel := s.scopedContext()
 	defer cancel()
 
 	var changes []changeEvent
 	err := s.db.StdTxn(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, selectQuery, s.upperBound())
+		var (
+			rows *sql.Rows
+			err  error
+		)
+		if stepTarget > 0 {
+			rows, err = tx.QueryContext(
+				ctx, selectStepQuery,
+				s.upperBound(), stepTarget,
+			)
+		} else {
+			rows, err = tx.QueryContext(
+				ctx, selectQuery, s.upperBound(),
+			)
+		}
 		if err != nil {
 			return errors.Annotate(err, "querying for changes")
 		}
@@ -576,6 +669,44 @@ func (s *Stream) readChanges() ([]changeEvent, error) {
 		return nil
 	})
 	return changes, errors.Trace(err)
+}
+
+// readDebugState queries debug_change_stream and returns the current
+// state. If the table has no rows (pre-migration), it returns the
+// default 'running' state.
+func (s *Stream) readDebugState(
+	ctx context.Context,
+) (debugState, error) {
+	var ds debugState
+	err := s.db.StdTxn(
+		ctx,
+		func(ctx context.Context, tx *sql.Tx) error {
+			row := tx.QueryRowContext(ctx, debugStateQuery)
+			err := row.Scan(&ds.state, &ds.stepTarget)
+			if errors.Is(err, sql.ErrNoRows) {
+				ds.state = "running"
+				return nil
+			}
+			return errors.Annotate(err, "scanning debug state")
+		},
+	)
+	return ds, errors.Trace(err)
+}
+
+// writeDebugPaused writes 'paused' back to debug_change_stream after a
+// step completes. The CAS WHERE clause ensures the update is a no-op
+// if the state has already been changed externally.
+func (s *Stream) writeDebugPaused(
+	ctx context.Context,
+	stepTarget int64,
+) error {
+	return s.db.StdTxn(
+		ctx,
+		func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, debugPauseQuery, stepTarget)
+			return errors.Annotate(err, "writing debug pause")
+		},
+	)
 }
 
 const (
