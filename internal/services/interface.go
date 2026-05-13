@@ -25,6 +25,7 @@ import (
 	controllerupgraderservice "github.com/juju/juju/domain/controllerupgrader/service"
 	credentialservice "github.com/juju/juju/domain/credential/service"
 	crossmodelrelationservice "github.com/juju/juju/domain/crossmodelrelation/service"
+	debugchangestreamservice "github.com/juju/juju/domain/debugchangestream/service"
 	exportservice "github.com/juju/juju/domain/export/service"
 	externalcontrollerservice "github.com/juju/juju/domain/externalcontroller/service"
 	flagservice "github.com/juju/juju/domain/flag/service"
@@ -98,6 +99,9 @@ type ControllerDomainServices interface {
 	ControllerChangeStream() *changestreamservice.Service
 	// Tracing returns the service for accessing tracing configuration.
 	Tracing() *tracingservice.Service
+	// DebugChangeStream returns the service for pausing, stepping,
+	// and resuming the controller database's changestream.
+	DebugChangeStream() *debugchangestreamservice.Service
 }
 
 // ModelDomainServices provides access to the services required by the
@@ -182,6 +186,9 @@ type ModelDomainServices interface {
 	ModelProvider() *modelproviderservice.Service
 	// ChangeStream returns the model change stream.
 	ChangeStream() *changestreamservice.Service
+	// DebugChangeStream returns the service for pausing, stepping,
+	// and resuming the model database's changestream.
+	DebugChangeStream() *debugchangestreamservice.Service
 	// Export returns the service for accessing model exports.
 	Export() *exportservice.Service
 }

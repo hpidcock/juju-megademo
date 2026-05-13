@@ -31,6 +31,8 @@ import (
 	controllernodestate "github.com/juju/juju/domain/controllernode/state"
 	credentialservice "github.com/juju/juju/domain/credential/service"
 	credentialstate "github.com/juju/juju/domain/credential/state"
+	debugchangestreamservice "github.com/juju/juju/domain/debugchangestream/service"
+	debugchangestreamstate "github.com/juju/juju/domain/debugchangestream/state"
 	externalcontrollerservice "github.com/juju/juju/domain/externalcontroller/service"
 	externalcontrollerstate "github.com/juju/juju/domain/externalcontroller/state"
 	flagservice "github.com/juju/juju/domain/flag/service"
@@ -216,6 +218,17 @@ func (s *ControllerServices) ControllerChangeStream() *changestreamservice.Servi
 			s.clock,
 			s.logger.Child("changestream"),
 		),
+	)
+}
+
+// DebugChangeStream returns the service for pausing, stepping,
+// and resuming the controller database's changestream.
+func (s *ControllerServices) DebugChangeStream() *debugchangestreamservice.Service {
+	return debugchangestreamservice.NewService(
+		debugchangestreamstate.NewState(
+			changestream.NewTxnRunnerFactory(s.controllerDB),
+		),
+		s.logger.Child("debugchangestream"),
 	)
 }
 

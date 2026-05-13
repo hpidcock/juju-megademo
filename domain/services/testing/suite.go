@@ -32,6 +32,7 @@ import (
 	controllerbootstrap "github.com/juju/juju/domain/controller/bootstrap"
 	controllerconfigbootstrap "github.com/juju/juju/domain/controllerconfig/bootstrap"
 	credentialbootstrap "github.com/juju/juju/domain/credential/bootstrap"
+	debugchangestreamservice "github.com/juju/juju/domain/debugchangestream/service"
 	modeldomain "github.com/juju/juju/domain/model"
 	modelbootstrap "github.com/juju/juju/domain/model/bootstrap"
 	modelconfigbootstrap "github.com/juju/juju/domain/modelconfig/bootstrap"
@@ -262,6 +263,13 @@ func (s *DomainServicesSuite) DomainServicesGetter(c *tc.C, objectStore objectst
 type domainServices struct {
 	*domainservices.ControllerServices
 	*domainservices.ModelServices
+}
+
+// DebugChangeStream resolves the embedding ambiguity between
+// ControllerServices and ModelServices. In the DomainServices
+// context, the model database's debug changestream is used.
+func (d *domainServices) DebugChangeStream() *debugchangestreamservice.Service {
+	return d.ModelServices.DebugChangeStream()
 }
 
 // DomainServicesGetterWithStorageRegistry provides an implementation of the

@@ -20,6 +20,7 @@ import (
 	"github.com/juju/juju/core/objectstore"
 	"github.com/juju/juju/core/providertracker"
 	"github.com/juju/juju/core/storage"
+	debugchangestreamservice "github.com/juju/juju/domain/debugchangestream/service"
 	domainservices "github.com/juju/juju/domain/services"
 	internalerrors "github.com/juju/juju/internal/errors"
 	"github.com/juju/juju/internal/services"
@@ -204,6 +205,14 @@ func (w *domainServicesWorker) Wait() error {
 type domainServices struct {
 	services.ControllerDomainServices
 	services.ModelDomainServices
+}
+
+// DebugChangeStream resolves the embedding ambiguity between
+// ControllerDomainServices and ModelDomainServices. In the
+// DomainServices context, the model database's debug changestream
+// service is used.
+func (d *domainServices) DebugChangeStream() *debugchangestreamservice.Service {
+	return d.ModelDomainServices.DebugChangeStream()
 }
 
 // domainServicesGetter is a domain services getter that returns the services

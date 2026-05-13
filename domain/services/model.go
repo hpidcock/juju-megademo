@@ -46,6 +46,8 @@ import (
 	containerimageresourcestorestate "github.com/juju/juju/domain/containerimageresourcestore/state"
 	controllerupgraderservice "github.com/juju/juju/domain/controllerupgrader/service"
 	controllerupgraderstate "github.com/juju/juju/domain/controllerupgrader/state"
+	debugchangestreamservice "github.com/juju/juju/domain/debugchangestream/service"
+	debugchangestreamstate "github.com/juju/juju/domain/debugchangestream/state"
 	crossmodelrelationservice "github.com/juju/juju/domain/crossmodelrelation/service"
 	crossmodelrelationstatecontroller "github.com/juju/juju/domain/crossmodelrelation/state/controller"
 	crossmodelrelationstatemodel "github.com/juju/juju/domain/crossmodelrelation/state/model"
@@ -626,6 +628,17 @@ func (s *ModelServices) ChangeStream() *changestreamservice.Service {
 			s.clock,
 			s.logger.Child("changestream"),
 		),
+	)
+}
+
+// DebugChangeStream returns the service for pausing, stepping,
+// and resuming the model database's changestream.
+func (s *ModelServices) DebugChangeStream() *debugchangestreamservice.Service {
+	return debugchangestreamservice.NewService(
+		debugchangestreamstate.NewState(
+			changestream.NewTxnRunnerFactory(s.modelDB),
+		),
+		s.logger.Child("debugchangestream"),
 	)
 }
 
