@@ -389,6 +389,7 @@ func newServer(ctx context.Context, cfg ServerConfig) (_ *Server, err error) {
 		charmhubHTTPClient:       cfg.CharmhubHTTPClient,
 		macaroonHTTPClient:       cfg.MacaroonHTTPClient,
 		dbGetter:                 cfg.DBGetter,
+		dqliteDBGetter:           adaptWatchableDBGetter(cfg.DBGetter),
 		domainServicesGetter:     cfg.DomainServicesGetter,
 		controllerDomainServices: controllerDomainServices,
 		tracerGetter:             cfg.TracerGetter,
@@ -1041,8 +1042,17 @@ func (srv *Server) endpoints() ([]apihttp.Endpoint, error) {
 	}, {
 		pattern:    objectsRoutePrefix,
 		methods:    []string{"GET"},
-		handler:    modelObjectsHTTPHandler,
+handler:    modelObjectsHTTPHandler,
 		authorizer: httpcontext.ControllerAuthorizer,
+	}, {
+		pattern:    "/dqlite",
+		handler: srv.monitoredHandler(
+			newDqliteHandler(httpCtxt, httpAuthenticator, controllerAdminAuthorizer, srv.shared.dqliteDBGetter),
+			"dqlite",
+		),
+		authorizer:  controllerAdminAuthorizer,
+		tracked:     true,
+		noModelUUID: true,
 	}}
 	if srv.registerIntrospectionHandlers != nil {
 		add := func(subpath string, h http.Handler) {
@@ -1523,4 +1533,10 @@ type resourceOpenerGetter func(r *http.Request, tagKinds ...string) (coreresourc
 
 func (rog resourceOpenerGetter) Opener(r *http.Request, tagKinds ...string) (coreresource.Opener, error) {
 	return rog(r, tagKinds...)
+}
+
+func adaptWatchableDBGetter(getter changestream.WatchableDBGetter) DBGetter {
+	return func(namespace string) (database.TxnRunner, error) {
+		return getter.GetWatchableDB(context.Background(), namespace)
+	}
 }

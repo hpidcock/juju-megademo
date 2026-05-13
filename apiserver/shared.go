@@ -49,6 +49,8 @@ type sharedServerContext struct {
 	// creating a new database for new models and during model migrations.
 	dbGetter changestream.WatchableDBGetter
 
+	dqliteDBGetter DBGetter
+
 	// DomainServicesGetter is used to get the domain services for controllers
 	// and models.
 	domainServicesGetter     services.DomainServicesGetter
@@ -101,6 +103,7 @@ type sharedServerConfig struct {
 	macaroonHTTPClient      facade.HTTPClient
 
 	dbGetter                 changestream.WatchableDBGetter
+	dqliteDBGetter           DBGetter
 	domainServicesGetter     services.DomainServicesGetter
 	controllerDomainServices services.ControllerDomainServices
 	tracerGetter             trace.TracerGetter
@@ -125,7 +128,7 @@ func (c *sharedServerConfig) validate() error {
 	if c.controllerConfig == nil {
 		return errors.NotValidf("nil controllerConfig")
 	}
-	if c.dbGetter == nil {
+if c.dbGetter == nil {
 		return errors.NotValidf("nil dbGetter")
 	}
 	if c.domainServicesGetter == nil {
@@ -178,6 +181,7 @@ func newSharedServerContext(config sharedServerConfig) (*sharedServerContext, er
 		charmhubHTTPClient:       config.charmhubHTTPClient,
 		macaroonHTTPClient:       config.macaroonHTTPClient,
 		dbGetter:                 config.dbGetter,
+		dqliteDBGetter:           config.dqliteDBGetter,
 		domainServicesGetter:     config.domainServicesGetter,
 		controllerDomainServices: config.controllerDomainServices,
 		tracerGetter:             config.tracerGetter,
