@@ -11,7 +11,7 @@ Tasks are ordered to produce a **runnable demo as early as possible**.
 | 2 — `dbDebugCommand` + registration | ✅ Complete | `06dd39c` (initial), `6aeead5` (test fixes) |
 | 3 — TUI model tests | ✅ Complete | Pending commit |
 | 4 — Client package `api/common/dqlite.go` | ✅ Complete | `b60c6d1` (initial), `1b09706` (review fixes) |
-| 5 — Backend handler `apiserver/dqlite.go` | ⬜ Not started | — |
+| 5 — Backend handler `apiserver/dqlite.go` | ✅ Complete | `f21faac1f6` (initial), `34231097` (review fixes) |
 | 6 — Wire real client | ⬜ Not started | — |
 | 7 — Memory files | ⬜ Not started | — |
 
@@ -34,6 +34,22 @@ Tasks are ordered to produce a **runnable demo as early as possible**.
 - **Local mirror types** (Task 1): `DqliteDatabase`, `DqliteObject`, `DqliteNode`,
   `DqliteQueryResult` are defined in `cmd/juju/debug/dqlite_api.go` (not imported
   from `api/common`). Replace with `api/common` imports when Phase 01 lands (Task 6).
+- **Extra `authenticator` field** (Task 5): The `dqliteHandler` struct stores an
+  `authentication.HTTPAuthenticator` field alongside the spec's 3-field struct
+  (`ctxt`, `dbGetter`, `authorizer`). This follows the `debugLogHandler` pattern
+  where the authenticator is stored directly on the handler rather than accessed
+  through `httpContext`. Functionally equivalent.
+- **`dqliteDBGetter` vs `dbGetter`** (Task 5): The route registration uses
+  `srv.shared.dqliteDBGetter` (a new `DBGetter` field on `sharedServerContext`)
+  instead of the spec's `srv.shared.dbGetter`. The existing `dbGetter` is
+  `changestream.WatchableDBGetter`, not `func(namespace string) (database.TxnRunner, error)`.
+  An adapter (`adaptWatchableDBGetter`) bridges the types.
+- **`clusterNodeInfo.ID` type** (Task 5): Uses `uint64` to match
+  `dbreplaccessor.Node.ID` for correct type assertion at runtime.
+- **`unauthenticated: true`** (Task 5): The `/dqlite` route uses
+  `unauthenticated: true` to skip middleware-level auth and rely solely on the
+  handler's own authentication inside the websocket connection (matching the
+  `debuglog` pattern).
 
 ---
 
