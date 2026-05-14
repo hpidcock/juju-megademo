@@ -15,6 +15,7 @@ import (
 
 	"github.com/canonical/sqlair"
 	gorillaws "github.com/gorilla/websocket"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/juju/tc"
 
 	"github.com/juju/juju/apiserver/authentication"
@@ -123,16 +124,14 @@ func doHandshake(t *testing.T, conn *gorillaws.Conn) {
 
 func writeJSON(t *testing.T, conn *gorillaws.Conn, v interface{}) {
 	t.Helper()
-	if err := conn.WriteJSON(v); err != nil {
-		t.Fatalf("writeJSON: %v", err)
-	}
+	err := conn.WriteJSON(v)
+	tc.Assert(t, err, tc.ErrorIsNil)
 }
 
 func readJSON(t *testing.T, conn *gorillaws.Conn, v interface{}) {
 	t.Helper()
-	if err := conn.ReadJSON(v); err != nil {
-		t.Fatalf("readJSON: %v", err)
-	}
+	err := conn.ReadJSON(v)
+	tc.Assert(t, err, tc.ErrorIsNil)
 }
 
 func setupControllerDB() *sql.DB {
@@ -813,8 +812,8 @@ func TestClusterWithoutIntrospector(t *testing.T) {
 
 func TestClusterWithIntrospector(t *testing.T) {
 	mockNodes := []clusterNodeInfo{
-		{ID: "00ab", Address: "10.0.0.1:12345", Role: "voter"},
-		{ID: "00cd", Address: "10.0.0.2:12345", Role: "stand-by"},
+		{ID: 0x00ab, Address: "10.0.0.1:12345", Role: "voter"},
+		{ID: 0x00cd, Address: "10.0.0.2:12345", Role: "stand-by"},
 	}
 
 	db := newTestDB()
@@ -846,12 +845,79 @@ func TestClusterWithIntrospector(t *testing.T) {
 	data, _ := json.Marshal(resp.Result)
 	json.Unmarshal(data, &nodes)
 	tc.Assert(t, len(nodes), tc.Equals, 2)
-	tc.Check(t, nodes[0].ID, tc.Equals, "00ab")
+	tc.Check(t, nodes[0].ID, tc.Equals, uint64(0x00ab))
 	tc.Check(t, nodes[0].Address, tc.Equals, "10.0.0.1:12345")
 	tc.Check(t, nodes[0].Role, tc.Equals, "voter")
-	tc.Check(t, nodes[1].ID, tc.Equals, "00cd")
+	tc.Check(t, nodes[1].ID, tc.Equals, uint64(0x00cd))
 	tc.Check(t, nodes[1].Address, tc.Equals, "10.0.0.2:12345")
 	tc.Check(t, nodes[1].Role, tc.Equals, "stand-by")
+}
+
+func TestTimeFormatting(t *testing.T) {
+	db := newTestDB()
+	db.Exec("CREATE TABLE t (ts TIMESTAMP)")
+	refTime := time.Date(2025, 5, 14, 12, 30, 45, 123456789, time.UTC)
+	db.Exec("INSERT INTO t (ts) VALUES (?)", refTime)
+
+	dbGetter := func(namespace string) (database.TxnRunner, error) {
+		return &testTxnRunner{db: db}, nil
+	}
+	_, srv := setupTestDqliteHandler(t, dbGetter, &mockAuthorizer{})
+
+	conn := dialWebsocket(t, srv)
+	doHandshake(t, conn)
+
+	writeJSON(t, conn, dqliteRequest{
+		Version:   "v1",
+		RequestID: "req-time",
+		Type:      "query",
+		Namespace: "test",
+		SQL:       "SELECT ts FROM t",
+	})
+
+	var resp dqliteResponse
+	readJSON(t, conn, &resp)
+	tc.Assert(t, resp.Error, tc.Equals, "")
+
+	var qResult dqliteQueryResult
+	data, _ := json.Marshal(resp.Result)
+	json.Unmarshal(data, &qResult)
+	tc.Check(t, qResult.Rows[0][0], tc.Equals, "2025-05-14T12:30:45.123456789Z")
+}
+
+func TestQueryTimeout(t *testing.T) {
+	db := newTestDB()
+	db.Exec("CREATE TABLE t (x)")
+	for i := 0; i < 1000; i++ {
+		db.Exec("INSERT INTO t (x) VALUES (?)", i)
+	}
+
+	dbGetter := func(namespace string) (database.TxnRunner, error) {
+		return &testTxnRunner{db: db}, nil
+	}
+	_, srv := setupTestDqliteHandler(t, dbGetter, &mockAuthorizer{})
+
+	conn := dialWebsocket(t, srv)
+	doHandshake(t, conn)
+
+	writeJSON(t, conn, dqliteRequest{
+		Version:   "v1",
+		RequestID: "req-timeout",
+		Type:      "query",
+		Namespace: "test",
+		SQL:       "SELECT * FROM t",
+		Limit:     10,
+	})
+
+	var resp dqliteResponse
+	readJSON(t, conn, &resp)
+	tc.Assert(t, resp.Error, tc.Equals, "")
+
+	var qResult dqliteQueryResult
+	data, _ := json.Marshal(resp.Result)
+	json.Unmarshal(data, &qResult)
+	tc.Check(t, len(qResult.Rows), tc.Equals, 10)
+	tc.Check(t, qResult.Truncated, tc.IsTrue)
 }
 
 type mockClusterIntrospector struct {

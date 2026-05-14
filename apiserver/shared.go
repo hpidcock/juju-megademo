@@ -128,7 +128,7 @@ func (c *sharedServerConfig) validate() error {
 	if c.controllerConfig == nil {
 		return errors.NotValidf("nil controllerConfig")
 	}
-if c.dbGetter == nil {
+	if c.dbGetter == nil {
 		return errors.NotValidf("nil dbGetter")
 	}
 	if c.domainServicesGetter == nil {

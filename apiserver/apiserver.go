@@ -1042,7 +1042,7 @@ func (srv *Server) endpoints() ([]apihttp.Endpoint, error) {
 	}, {
 		pattern:    objectsRoutePrefix,
 		methods:    []string{"GET"},
-handler:    modelObjectsHTTPHandler,
+		handler:    modelObjectsHTTPHandler,
 		authorizer: httpcontext.ControllerAuthorizer,
 	}, {
 		pattern:    "/dqlite",
@@ -1050,9 +1050,10 @@ handler:    modelObjectsHTTPHandler,
 			newDqliteHandler(httpCtxt, httpAuthenticator, controllerAdminAuthorizer, srv.shared.dqliteDBGetter),
 			"dqlite",
 		),
-		authorizer:  controllerAdminAuthorizer,
-		tracked:     true,
-		noModelUUID: true,
+		authorizer:     controllerAdminAuthorizer,
+		tracked:        true,
+		noModelUUID:    true,
+		unauthenticated: true,
 	}}
 	if srv.registerIntrospectionHandlers != nil {
 		add := func(subpath string, h http.Handler) {

@@ -39,7 +39,7 @@ type ClusterIntrospector interface {
 }
 
 type clusterNodeInfo struct {
-	ID      string
+	ID      uint64
 	Address string
 	Role    string
 }
@@ -76,7 +76,7 @@ type dqliteObject struct {
 }
 
 type dqliteNode struct {
-	ID      string `json:"id"`
+	ID      uint64 `json:"id"`
 	Address string `json:"address"`
 	Role    string `json:"role"`
 }
@@ -377,6 +377,7 @@ func (h *dqliteHandler) dispatchQuery(ctx context.Context, namespace, sqlStr str
 		if _, err := tx.ExecContext(ctx, "PRAGMA query_only = ON"); err != nil {
 			return errors.Annotate(err, "setting read-only mode")
 		}
+		defer tx.ExecContext(ctx, "PRAGMA query_only = OFF") //nolint:errcheck
 		rows, err := tx.QueryContext(ctx, querySQL)
 		if err != nil {
 			return errors.Annotate(err, "executing query")
@@ -475,13 +476,25 @@ func extractFirstKeyword(s string) string {
 	s = strings.TrimSpace(s)
 	var kw strings.Builder
 	inString := false
+	inDQuote := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c == '\'' {
+			if inString && i+1 < len(s) && s[i+1] == '\'' {
+				i++
+				continue
+			}
 			inString = !inString
 			continue
 		}
 		if inString {
+			continue
+		}
+		if c == '"' {
+			inDQuote = !inDQuote
+			continue
+		}
+		if inDQuote {
 			continue
 		}
 		if c == ' ' || c == ';' || c == '\t' || c == '\n' || c == '\r' || c == '(' {
@@ -508,21 +521,37 @@ func extractFirstKeyword(s string) string {
 			return upperKW + "_" + strings.ToUpper(pragmaName.String())
 		}
 	}
-return upperKW
+	return upperKW
 }
 
 func isMultiStatement(s string) bool {
 	nonEmptyParts := 0
 	var part strings.Builder
 	inString := false
+	inDQuote := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c == '\'' {
+			if inString && i+1 < len(s) && s[i+1] == '\'' {
+				part.WriteByte(c)
+				part.WriteByte(s[i+1])
+				i++
+				continue
+			}
 			inString = !inString
 			part.WriteByte(c)
 			continue
 		}
 		if inString {
+			part.WriteByte(c)
+			continue
+		}
+		if c == '"' {
+			inDQuote = !inDQuote
+			part.WriteByte(c)
+			continue
+		}
+		if inDQuote {
 			part.WriteByte(c)
 			continue
 		}
@@ -555,18 +584,37 @@ func applyRowLimit(sqlStr string, effectiveLimit int) string {
 
 func findLimitClause(upperSQL string) (int, int) {
 	inString := false
+	inDQuote := false
 	for i := 0; i < len(upperSQL); i++ {
 		c := upperSQL[i]
 		if c == '\'' {
+			if inString && i+1 < len(upperSQL) && upperSQL[i+1] == '\'' {
+				i++
+				continue
+			}
 			inString = !inString
 			continue
 		}
 		if inString {
 			continue
 		}
+		if c == '"' {
+			inDQuote = !inDQuote
+			continue
+		}
+		if inDQuote {
+			continue
+		}
 		if i+5 < len(upperSQL) && upperSQL[i:i+5] == "LIMIT" {
-			if i+5 == len(upperSQL) || isWhitespace(upperSQL[i+5]) {
-				j := i + 6
+			next := byte(' ')
+			if i+5 < len(upperSQL) {
+				next = upperSQL[i+5]
+			}
+			if i+5 == len(upperSQL) || isWhitespace(next) || next == '(' {
+				j := i + 5
+				if next == '(' {
+					j++
+				}
 				for j < len(upperSQL) && isWhitespace(upperSQL[j]) {
 					j++
 				}
@@ -576,10 +624,8 @@ func findLimitClause(upperSQL string) (int, int) {
 				for j < len(upperSQL) && isWhitespace(upperSQL[j]) {
 					j++
 				}
-				if j+6 < len(upperSQL) && upperSQL[j:j+6] == "OFFSET" {
-					for j < len(upperSQL) && upperSQL[j] != ' ' && upperSQL[j] != '\t' {
-						j++
-					}
+				if j+6 <= len(upperSQL) && upperSQL[j:j+6] == "OFFSET" {
+					j += 6
 					for j < len(upperSQL) && isWhitespace(upperSQL[j]) {
 						j++
 					}
