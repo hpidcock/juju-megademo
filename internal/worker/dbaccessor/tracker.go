@@ -21,6 +21,7 @@ import (
 	"github.com/juju/juju/core/logger"
 	"github.com/juju/juju/domain/schema"
 	"github.com/juju/juju/internal/database"
+	"github.com/juju/juju/internal/database/hookdriver"
 	"github.com/juju/juju/internal/database/pragma"
 	"github.com/juju/juju/internal/database/txn"
 )
@@ -128,16 +129,11 @@ func newTrackedDBWorker(
 	// Set the db transaction metrics for the namespace.
 	w.dbTxnMetrics = w.metrics.DBMetricsForNamespace(namespace)
 
-	// Build a runner with change_log hooks so every write transaction
-	// stamps txn_id and trace context into the change_log tables.
 	runnerOpts := []txn.Option{}
 	if w.logger != nil {
 		runnerOpts = append(runnerOpts, txn.WithLogger(w.logger))
 	}
-	w.runner = txn.NewRetryingTxnRunnerWithHooks(
-		database.ChangeLogTxnHooks(),
-		runnerOpts...,
-	)
+	w.runner = txn.NewRetryingTxnRunner(runnerOpts...)
 
 	db, err := w.openDatabase(ctx)
 	if err != nil {
@@ -161,6 +157,14 @@ func newTrackedDBWorker(
 	return w, nil
 }
 
+// dsnProvider is an optional interface that DBApp implementations may
+// satisfy to expose the data source name used by Open. When available,
+// openDatabase uses it to create the hook-shim connector; when absent
+// (e.g. test mocks) the raw DB is used directly.
+type dsnProvider interface {
+	OpenDSN(name string) string
+}
+
 func (w *trackedDBWorker) openDatabase(ctx context.Context) (*sql.DB, error) {
 	// Set a timeout for the starting of the worker. This prevents us
 	// locking up indefinitely if something goes wrong. This will stall the
@@ -170,20 +174,43 @@ func (w *trackedDBWorker) openDatabase(ctx context.Context) (*sql.DB, error) {
 	ctx, cancel := context.WithTimeout(ctx, dbOpenTimeout)
 	defer cancel()
 
-	db, err := w.dbApp.Open(ctx, w.namespace)
+	raw, err := w.dbApp.Open(ctx, w.namespace)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	applyDBLimits(db)
+	// Wrap with change_log hooks when the DBApp can supply the DSN for
+	// creating the shim's own connection pool. Test mocks don't satisfy
+	// dsnProvider, so they use the raw DB directly.
+	if dp, ok := w.dbApp.(dsnProvider); ok {
+		dsn := dp.OpenDSN(w.namespace)
+		db := hookdriver.WrapDB(raw, dsn, database.ChangeLogTxnHooks())
+		// Close the original pool; the wrapped DB has its own connector.
+		_ = raw.Close()
+		applyDBLimits(db)
+		if err := pragma.SetPragma(
+			ctx, db, pragma.ForeignKeysPragma, true,
+		); err != nil {
+			_ = db.Close()
+			return nil, errors.Annotate(
+				err, "setting foreign keys pragma",
+			)
+		}
+		return db, nil
+	}
+
+	applyDBLimits(raw)
 
 	// Ensure that foreign keys are enabled, as we rely on them for referential
 	// integrity.
-	if err := pragma.SetPragma(ctx, db, pragma.ForeignKeysPragma, true); err != nil {
+	if err := pragma.SetPragma(
+		ctx, raw, pragma.ForeignKeysPragma, true,
+	); err != nil {
+		_ = raw.Close()
 		return nil, errors.Annotate(err, "setting foreign keys pragma")
 	}
 
-	return db, nil
+	return raw, nil
 }
 
 func (w *trackedDBWorker) ensureModelDBInitialised(ctx context.Context) error {

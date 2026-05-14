@@ -14,6 +14,7 @@ import (
 	"github.com/juju/juju/domain/schema"
 	schematesting "github.com/juju/juju/domain/schema/testing"
 	"github.com/juju/juju/internal/database"
+	"github.com/juju/juju/internal/database/hookdriver"
 	dbtesting "github.com/juju/juju/internal/database/testing"
 )
 
@@ -38,9 +39,8 @@ func (s *hooksSuite) SetUpTest(c *tc.C) {
 }
 
 // runWithHooks executes fn inside a plain write transaction wrapped by the
-// ChangeLogTxnHooks Setup and Finalise calls. This simulates the behaviour of
-// RetryingTxnRunner.StdTxn on the write path without requiring DQLite's
-// SQLITE_READONLY upgrade mechanism.
+// ChangeLogTxnHooks Setup and Finalise calls. This simulates the behaviour
+// of the hookdriver shim on the write path.
 func (s *hooksSuite) runWithHooks(
 	ctx context.Context,
 	c *tc.C,
@@ -49,7 +49,15 @@ func (s *hooksSuite) runWithHooks(
 	hooks := database.ChangeLogTxnHooks()
 	tx, err := s.DB().BeginTx(ctx, nil)
 	c.Assert(err, tc.ErrorIsNil)
-	if err := hooks.StdSetup(ctx, tx); err != nil {
+	execFn := func(
+		ctx context.Context,
+		query string,
+		args ...interface{},
+	) error {
+		_, err := tx.ExecContext(ctx, query, args...)
+		return err
+	}
+	if err := hooks.Setup(ctx, hookdriver.ExecFunc(execFn)); err != nil {
 		_ = tx.Rollback()
 		c.Fatalf("hooks.Setup: %v", err)
 	}
@@ -57,7 +65,7 @@ func (s *hooksSuite) runWithHooks(
 		_ = tx.Rollback()
 		c.Fatalf("tx fn: %v", err)
 	}
-	if err := hooks.StdFinalise(ctx, tx); err != nil {
+	if err := hooks.Finalise(ctx, hookdriver.ExecFunc(execFn)); err != nil {
 		_ = tx.Rollback()
 		c.Fatalf("hooks.Finalise: %v", err)
 	}
@@ -253,8 +261,9 @@ func (s *hooksSuite) TestReadOnlyTxnDoesNotModifyTraceCtx(c *tc.C) {
 	c.Assert(err, tc.ErrorIsNil)
 	c.Assert(isInTxnBefore, tc.Equals, 0)
 
-	// Perform a read-only query with no hook involvement.
-	tx, err := s.DB().BeginTx(c.Context(), &sql.TxOptions{ReadOnly: true})
+	// Perform a read-only query via a plain transaction.
+	// No hooks are triggered because no write statement is executed.
+	tx, err := s.DB().BeginTx(c.Context(), nil)
 	c.Assert(err, tc.ErrorIsNil)
 	var count int
 	err = tx.QueryRowContext(

@@ -64,6 +64,13 @@ type dbApp struct {
 	*app.App
 }
 
+// OpenDSN returns the data source name used internally by Open for the
+// given database name. This allows the hook shim to open additional
+// connections to the same underlying file or dqlite node.
+func (a *dbApp) OpenDSN(name string) string {
+	return a.App.DSN(name)
+}
+
 // Client implements DBApp by returning a Client indirection.
 func (a *dbApp) Client(ctx context.Context) (Client, error) {
 	c, err := a.App.Client(ctx)

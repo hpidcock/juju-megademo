@@ -86,6 +86,15 @@ type App struct {
 	dir string
 }
 
+// DSN returns the data source name that Open uses for the given database
+// name. For the non-dqlite build this is the full file path.
+func (a *App) DSN(name string) string {
+	if name == ":memory:" {
+		return name
+	}
+	return filepath.Join(a.dir, name)
+}
+
 // New creates a new application node.
 func New(dir string, options ...Option) (*App, error) {
 	return &App{dir: dir}, nil

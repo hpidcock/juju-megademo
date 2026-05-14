@@ -101,6 +101,12 @@ func New(dir string, options ...Option) (*App, error) {
 	}, nil
 }
 
+// DSN returns the data source name that Open uses for the given database
+// name. For the dqlite build this is simply the namespace name.
+func (a *App) DSN(name string) string {
+	return name
+}
+
 // Close will close the application.
 // This will close it exactly once. Any subsequent calls will return the same
 // error.
