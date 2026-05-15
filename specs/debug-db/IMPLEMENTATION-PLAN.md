@@ -12,8 +12,10 @@ Tasks are ordered to produce a **runnable demo as early as possible**.
 | 3 — TUI model tests | ✅ Complete | Pending commit |
 | 4 — Client package `api/common/dqlite.go` | ✅ Complete | `b60c6d1` (initial), `1b09706` (review fixes) |
 | 5 — Backend handler `apiserver/dqlite.go` | ✅ Complete | `f21faac1f6` (initial), `34231097` (review fixes) |
-| 6 — Wire real client | ⬜ Not started | — |
+| 6 — Wire real client | ✅ Complete | `cc6e0cdb3b` |
 | 7 — Memory files | ⬜ Not started | — |
+| 8 — TUI layout refinement | ✅ Complete | `480d56b5f4` |
+| 9 — TUI visual polish and UX fixes | ⬜ Not started | — |
 
 ## Deviations from spec
 
@@ -27,13 +29,13 @@ Tasks are ordered to produce a **runnable demo as early as possible**.
   constants. These key combinations cannot be constructed as `tea.KeyMsg` in tests.
   The underlying code paths (`reloadObjects`, `loadQueryCmd`) are covered via
   `TestReloadObjectsUsesKind` and `TestLoadQueryCmdCallsAPI`.
-- **`WrapControllerSkipControllerFlags`** (Task 2): The `dbDebugCommand` uses
+- **`WrapControllerSkipControllerFlags`** (Task 2): The `dbDebugCommand` used
   `modelcmd.WrapController(c, modelcmd.WrapControllerSkipControllerFlags)` to
-  avoid requiring a live controller for the mock-based demo. This flag must be
-  removed in Task 6 when real API wiring is added.
+  avoid requiring a live controller for the mock-based demo. Removed in Task 6
+  when real API wiring was added.
 - **Local mirror types** (Task 1): `DqliteDatabase`, `DqliteObject`, `DqliteNode`,
-  `DqliteQueryResult` are defined in `cmd/juju/debug/dqlite_api.go` (not imported
-  from `api/common`). Replace with `api/common` imports when Phase 01 lands (Task 6).
+  `DqliteQueryResult` were defined in `cmd/juju/debug/dqlite_api.go` (not imported
+  from `api/common`). Replaced with `api/common` imports in Task 6.
 - **Extra `authenticator` field** (Task 5): The `dqliteHandler` struct stores an
   `authentication.HTTPAuthenticator` field alongside the spec's 3-field struct
   (`ctxt`, `dbGetter`, `authorizer`). This follows the `debugLogHandler` pattern
@@ -390,7 +392,7 @@ responds correctly to all request types with an in-memory DB.
 
 ---
 
-## Task 6 — Wire real client into `dbDebugCommand` (end-to-end demo)
+## Task 6 — Wire real client into `dbDebugCommand` (end-to-end demo) ✅
 
 **Goal**: Replace the mock API in `dbDebugCommand.Run` with the real
 `common.OpenDqlite` → `NewDqliteAPI` chain. The TUI now talks to a live
@@ -399,7 +401,7 @@ controller.
 **Demo after this task**: `juju db-debug` against a real controller
 browses live Dqlite data — **full end-to-end demo**.
 
-**Files to modify**:
+**Files modified**:
 
 | File | Change |
 |------|--------|
@@ -436,11 +438,7 @@ browses live Dqlite data — **full end-to-end demo**.
    return err
    ```
 
-3. **`cmd/juju/debug/dqlite_model.go`**: Remove the hardcoded
-   `loadDatabasesCmd` override. The real `loadDatabasesCmd` now calls
-   `api.Databases(ctx)` which goes through the WebSocket.
-
-4. **Remove local mirror types** from Task 1 — replace with imports from
+3. **Remove local mirror types** from Task 1 — replaced with imports from
    `api/common` (now available after Phase 01 landed).
 
 **Research files**:
@@ -468,23 +466,131 @@ Each memory file must include: file paths created, wiring locations, protocol de
 
 ---
 
+## Task 8 — TUI layout refinement (2-column + sub-model decomposition) ✅
+
+**Goal**: Replace the original 3-column horizontal layout with a 2-column
+stacked layout following the `debug-tui` patterns. Decompose the monolithic
+`dqliteModel` into composable sub-models with viewports.
+
+**Demo after this task**: TUI renders in 2-column layout, databases and
+objects lists scroll when content exceeds viewport, cluster bar is compact,
+active pane has green border, context bar shows controller name.
+
+**Files created/modified**:
+
+| File | Action |
+|------|--------|
+| `cmd/juju/debug/dqlite_databases.go` | Create — `dqliteDBListModel` with viewport, cursor tracking |
+| `cmd/juju/debug/dqlite_objects.go` | Create — `dqliteObjListModel` with viewport, kind cycling |
+| `cmd/juju/debug/dqlite_detail.go` | Create — `dqliteDetailModel` with DDL/results viewports, query textarea |
+| `cmd/juju/debug/dqlite_cluster.go` | Create — `dqliteClusterModel` compact bar |
+| `cmd/juju/debug/dqlite_model.go` | Rewrite — thin compositor, 2-column layout, context bar, key routing |
+| `cmd/juju/debug/dbdebug_test.go` | Update — field access paths, focus enum, 3-zone Tab cycling |
+| `specs/debug-db/phase-02-tui.md` | Update — new layout spec, sub-model decomposition, focus zones |
+
+**Bugs fixed**:
+
+1. **Navigation broken**: up/down keys were intercepted by the top-level
+   model which only updated the cursor integer without re-rendering viewport
+   content or syncing scroll. Fix: delegate up/down to focused sub-models
+   which call `refreshViewport()` (re-render + sync) on cursor move.
+
+2. **Controller DB duplicated**: backend `dispatchDatabases()` returns
+   controller model from `SELECT uuid, name FROM model` AND prepends a
+   special controller entry. Fix: `deduplicateDatabases()` filters out
+   model-type entries sharing a name with an existing controller-type entry.
+
+**Verification**: `go build ./cmd/juju/...` and `go test ./cmd/juju/debug/...` pass.
+
+---
+
+## Task 9 — TUI visual polish and UX fixes
+
+**Goal**: Fix remaining visual and UX issues in the `juju db-debug` TUI.
+This task is intended to be delegated to an independent agent who will
+run the TUI against a real controller, identify issues, and fix them.
+
+**Scope**: The agent should run `juju db-debug` against a bootstrapped
+controller and iterate on any issues found. The list below is a starting
+point — the agent should add items as they discover them.
+
+**Known issues to investigate**:
+
+- **Layout overflow**: Pane borders and content may overflow terminal
+  width when the left column (30%) + right column (70%) plus borders
+  exceed the actual terminal width. The `lipgloss.JoinHorizontal` call
+  in `View()` does not account for border characters consumed by each
+  pane.
+- **Viewport height calculation**: The `Height()` methods on sub-models
+  return a minimum of 4, but the actual rendered height includes the
+  header bar and border (3 extra lines). If the computed height is too
+  small, the viewport gets 0 or negative lines and renders nothing.
+- **Context bar hardcoded "mycontroller"**: The context bar currently
+  renders a hardcoded string "mycontroller" instead of the real
+  controller name from the API connection. Wire the actual controller
+  name through `dbDebugCommand.Run()` into `dqliteModel`.
+- **Detail pane separator width**: The `strings.Repeat("─", ...)` in
+  `dqliteDetailModel.View()` uses `m.width - 4` which may not match
+  the actual interior width after borders are applied.
+- **Query textarea height**: The textarea is configured with
+  `SetHeight(1)` in `WindowSizeMsg` but this may not render correctly
+  inside the bordered pane — verify the textarea is visible and
+  usable.
+- **Cluster bar width**: The cluster bar uses `m.width` for the top
+  border but the content line may exceed the terminal width when
+  multiple nodes have long addresses.
+- **Error banner positioning**: The error message is appended after
+  the cluster bar as a separate line, which may push content off-screen.
+  Consider integrating the error into the context bar or a dedicated
+  status line.
+
+**Files likely to modify**:
+
+| File | Expected changes |
+|------|-----------------|
+| `cmd/juju/debug/dqlite_model.go` | Layout math, context bar, error display |
+| `cmd/juju/debug/dqlite_databases.go` | Height/border calculation |
+| `cmd/juju/debug/dqlite_objects.go` | Height/border calculation |
+| `cmd/juju/debug/dqlite_detail.go` | Separator width, textarea height, viewport sizing |
+| `cmd/juju/debug/dqlite_cluster.go` | Width clamping, node formatting |
+| `cmd/juju/debug/dbdebug.go` | Pass controller name to model |
+
+**Research files to read first**:
+- `cmd/juju/debug/dqlite_model.go` — layout math in `layoutSubviews()`
+- `cmd/juju/debug/dqlite_databases.go` — `View()` border/height math
+- `cmd/juju/debug/dqlite_detail.go` — `View()` separator and textarea sizing
+- `cmd/juju/debug/dqlite_cluster.go` — `View()` width handling
+- `cmd/juju/debug/model.go` (debug-tui) — `viewContextBar()` and
+  `paneHeight()` patterns for reference
+
+**Verification**: `go build ./cmd/juju/...` and `go test ./cmd/juju/debug/...`
+pass. Manual test: `juju db-debug` against a bootstrapped controller renders
+correctly at 80x24, 120x40, and full-screen terminal sizes.
+
+---
+
 ## Dependency graph
 
 ```
 Task 1 (TUI mock) ──► Task 2 (command) ──► Task 3 (tests)
-                                              │
-                                              │  (can run in parallel after Task 1)
-                                              ▼
-                              Task 4 (client) ──► Task 5 (backend)
-                                                      │
-                                                      ▼
-                                              Task 6 (wire real) ──► Task 7 (memory)
+                                               │
+                                               │  (can run in parallel after Task 1)
+                                               ▼
+                               Task 4 (client) ──► Task 5 (backend)
+                                                       │
+                                                       ▼
+                                               Task 6 (wire real) ──► Task 7 (memory)
+                                                       │
+                                                       ▼
+                                               Task 8 (TUI refine) ──► Task 9 (visual polish)
 ```
 
 - **Tasks 1–3** are sequential and produce a working TUI demo with mock data.
 - **Tasks 4 and 5** can run in parallel (client and backend are independent).
 - **Task 6** requires both 4 and 5 to be complete.
 - **Task 7** is final bookkeeping.
+- **Task 8** refines the TUI layout and fixes two bugs.
+- **Task 9** is visual polish and UX fixes, delegable to an independent agent.
 
 ## Demo milestones
 
@@ -495,3 +601,5 @@ Task 1 (TUI mock) ──► Task 2 (command) ──► Task 3 (tests)
 | 3 | All TUI interactions verified by tests |
 | 4–5 | Client + backend pass their own test suites |
 | 6 | Full end-to-end: `juju db-debug` against a live controller |
+| 8 | 2-column layout with scrollable viewports, no duplicate controller |
+| 9 | Polished TUI that renders correctly at all terminal sizes |
