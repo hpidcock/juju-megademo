@@ -94,6 +94,7 @@ func setupTestDqliteHandler(t *testing.T, dbGetter DBGetter, authorizer authenti
 		&mockAuthenticator{},
 		authorizer,
 		dbGetter,
+		"deadbeef-1234-5678-9abc-def012345678",
 	)
 	mux := http.NewServeMux()
 	mux.Handle("/dqlite", handler)
@@ -113,6 +114,10 @@ func dialWebsocket(t *testing.T, srv *httptest.Server) *gorillaws.Conn {
 
 func doHandshake(t *testing.T, conn *gorillaws.Conn) {
 	t.Helper()
+	// Consume the initial SendInitialErrorV0(nil) frame sent by the
+	// handler after successful authentication.
+	readInitialErrorV0(t, conn)
+
 	msg := dqliteRequest{Version: "v1"}
 	writeJSON(t, conn, msg)
 
@@ -120,6 +125,24 @@ func doHandshake(t *testing.T, conn *gorillaws.Conn) {
 	readJSON(t, conn, &resp)
 	tc.Assert(t, resp.Version, tc.Equals, serverVersion)
 	tc.Assert(t, resp.Error, tc.Equals, "")
+}
+
+// readInitialErrorV0 reads the params.ErrorResult frame sent by the
+// handler's SendInitialErrorV0 call after authentication.
+func readInitialErrorV0(t *testing.T, conn *gorillaws.Conn) {
+	t.Helper()
+	_, body, err := conn.ReadMessage()
+	tc.Assert(t, err, tc.ErrorIsNil)
+
+	// Strip the trailing newline from the V0 protocol convention.
+	body = body[:len(body)-1]
+	var errResult struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	tc.Assert(t, json.Unmarshal(body, &errResult), tc.ErrorIsNil)
+	tc.Assert(t, errResult.Error, tc.IsNil)
 }
 
 func writeJSON(t *testing.T, conn *gorillaws.Conn, v interface{}) {
@@ -163,6 +186,7 @@ func TestVersionHandshake(t *testing.T) {
 	_, srv := setupTestDqliteHandler(t, dbGetter, &mockAuthorizer{})
 
 	conn := dialWebsocket(t, srv)
+	readInitialErrorV0(t, conn)
 	msg := dqliteRequest{Version: "v1"}
 	writeJSON(t, conn, msg)
 
@@ -179,6 +203,7 @@ func TestUnknownVersion(t *testing.T) {
 	_, srv := setupTestDqliteHandler(t, dbGetter, &mockAuthorizer{})
 
 	conn := dialWebsocket(t, srv)
+	readInitialErrorV0(t, conn)
 	msg := dqliteRequest{Version: "v2"}
 	writeJSON(t, conn, msg)
 
@@ -613,12 +638,17 @@ func TestAuthFailure(t *testing.T) {
 	_, srv := setupTestDqliteHandler(t, dbGetter, &rejectAuthorizer{})
 
 	conn := dialWebsocket(t, srv)
-	msg := dqliteRequest{Version: "v1"}
-	writeJSON(t, conn, msg)
+	_, body, err := conn.ReadMessage()
+	tc.Assert(t, err, tc.ErrorIsNil)
 
-	var resp dqliteResponse
-	readJSON(t, conn, &resp)
-	tc.Check(t, strings.Contains(resp.Error, "authorization"), tc.IsTrue)
+	body = body[:len(body)-1]
+	var errResult struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	tc.Assert(t, json.Unmarshal(body, &errResult), tc.ErrorIsNil)
+	tc.Check(t, strings.Contains(errResult.Error.Message, "authorization"), tc.IsTrue)
 }
 
 func TestGracefulDisconnect(t *testing.T) {

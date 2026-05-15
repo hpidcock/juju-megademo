@@ -15,6 +15,8 @@ import (
 	jujucmd "github.com/juju/juju/cmd"
 	"github.com/juju/juju/cmd/cmd"
 	"github.com/juju/juju/cmd/modelcmd"
+
+	"github.com/juju/juju/api/common"
 )
 
 type dbDebugCommand struct {
@@ -25,7 +27,7 @@ type dbDebugCommand struct {
 
 func NewDbDebugCommand() cmd.Command {
 	c := &dbDebugCommand{limit: 100}
-	return modelcmd.WrapController(c, modelcmd.WrapControllerSkipControllerFlags)
+	return modelcmd.WrapController(c)
 }
 
 var description = `
@@ -58,34 +60,23 @@ func (c *dbDebugCommand) Run(ctx *cmd.Context) error {
 		return errors.New("juju db-debug requires an interactive terminal")
 	}
 
-	api := &mockDqliteAPI{}
-	model := NewDqliteModel(api)
+	conn, err := c.NewAPIRoot(context.Background())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer conn.Close()
+
+	client, err := common.OpenDqlite(context.Background(), conn)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer client.Close()
+
+	model := NewDqliteModel(NewDqliteAPI(client))
 	model.preSelectDatabase = c.database
 	model.defaultLimit = c.limit
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
-	_, err := p.Run()
+	_, err = p.Run()
 	return err
-}
-
-type mockDqliteAPI struct{}
-
-func (m *mockDqliteAPI) Databases(_ context.Context) ([]DqliteDatabase, error) {
-	return nil, nil
-}
-
-func (m *mockDqliteAPI) Objects(_ context.Context, _, _ string) ([]DqliteObject, error) {
-	return nil, nil
-}
-
-func (m *mockDqliteAPI) DDL(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-
-func (m *mockDqliteAPI) Query(_ context.Context, _, _ string, _ int) (*DqliteQueryResult, error) {
-	return nil, nil
-}
-
-func (m *mockDqliteAPI) Cluster(_ context.Context) ([]DqliteNode, error) {
-	return nil, nil
 }

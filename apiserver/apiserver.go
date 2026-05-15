@@ -1047,7 +1047,7 @@ func (srv *Server) endpoints() ([]apihttp.Endpoint, error) {
 	}, {
 		pattern:    "/dqlite",
 		handler: srv.monitoredHandler(
-			newDqliteHandler(httpCtxt, httpAuthenticator, controllerAdminAuthorizer, srv.shared.dqliteDBGetter),
+			newDqliteHandler(httpCtxt, httpAuthenticator, controllerAdminAuthorizer, srv.shared.dqliteDBGetter, controllerModelUUID),
 			"dqlite",
 		),
 		authorizer:     controllerAdminAuthorizer,

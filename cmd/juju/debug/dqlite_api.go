@@ -5,63 +5,42 @@ package debug
 
 import (
 	"context"
+
+	"github.com/juju/juju/api/common"
 )
 
-type DqliteDatabase struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Type      string `json:"type"`
-	UUID      string `json:"uuid,omitempty"`
-}
-
-type DqliteObject struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-}
-
-type DqliteNode struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
-	Role    string `json:"role"`
-}
-
-type DqliteQueryResult struct {
-	Columns   []string   `json:"columns"`
-	Rows      [][]string  `json:"rows"`
-	Count     int         `json:"count"`
-	Truncated bool        `json:"truncated"`
-}
-
 type DqliteAPI interface {
-	Databases(ctx context.Context) ([]DqliteDatabase, error)
-	Objects(ctx context.Context, ns, kind string) ([]DqliteObject, error)
+	Databases(ctx context.Context) ([]common.DqliteDatabase, error)
+	Objects(ctx context.Context, ns, kind string) ([]common.DqliteObject, error)
 	DDL(ctx context.Context, ns, name string) (string, error)
-	Query(ctx context.Context, ns, sql string, limit int) (*DqliteQueryResult, error)
-	Cluster(ctx context.Context) ([]DqliteNode, error)
+	Query(ctx context.Context, ns, sql string, limit int) (*common.DqliteQueryResult, error)
+	Cluster(ctx context.Context) ([]common.DqliteNode, error)
 }
 
-type dqliteAPIImpl struct{}
-
-func NewDqliteAPI() DqliteAPI {
-	return &dqliteAPIImpl{}
+type dqliteAPIImpl struct {
+	client *common.DqliteClient
 }
 
-func (a *dqliteAPIImpl) Databases(_ context.Context) ([]DqliteDatabase, error) {
-	panic("not implemented")
+func NewDqliteAPI(client *common.DqliteClient) DqliteAPI {
+	return &dqliteAPIImpl{client: client}
 }
 
-func (a *dqliteAPIImpl) Objects(_ context.Context, _, _ string) ([]DqliteObject, error) {
-	panic("not implemented")
+func (a *dqliteAPIImpl) Databases(ctx context.Context) ([]common.DqliteDatabase, error) {
+	return a.client.Databases(ctx)
 }
 
-func (a *dqliteAPIImpl) DDL(_ context.Context, _, _ string) (string, error) {
-	panic("not implemented")
+func (a *dqliteAPIImpl) Objects(ctx context.Context, ns, kind string) ([]common.DqliteObject, error) {
+	return a.client.Objects(ctx, ns, kind)
 }
 
-func (a *dqliteAPIImpl) Query(_ context.Context, _ string, _ string, _ int) (*DqliteQueryResult, error) {
-	panic("not implemented")
+func (a *dqliteAPIImpl) DDL(ctx context.Context, ns, name string) (string, error) {
+	return a.client.DDL(ctx, ns, name)
 }
 
-func (a *dqliteAPIImpl) Cluster(_ context.Context) ([]DqliteNode, error) {
-	panic("not implemented")
+func (a *dqliteAPIImpl) Query(ctx context.Context, ns, sql string, limit int) (*common.DqliteQueryResult, error) {
+	return a.client.Query(ctx, ns, sql, limit)
+}
+
+func (a *dqliteAPIImpl) Cluster(ctx context.Context) ([]common.DqliteNode, error) {
+	return a.client.Cluster(ctx)
 }

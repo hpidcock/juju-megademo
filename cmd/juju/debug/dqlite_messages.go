@@ -7,15 +7,17 @@ import (
 	"context"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/juju/juju/api/common"
 )
 
 type loadDatabasesMsg struct {
-	databases []DqliteDatabase
+	databases []common.DqliteDatabase
 	err       error
 }
 
 type loadObjectsMsg struct {
-	objects []DqliteObject
+	objects []common.DqliteObject
 	err     error
 }
 
@@ -25,12 +27,12 @@ type loadDDLMsg struct {
 }
 
 type loadQueryMsg struct {
-	result *DqliteQueryResult
+	result *common.DqliteQueryResult
 	err    error
 }
 
 type loadClusterMsg struct {
-	nodes []DqliteNode
+	nodes []common.DqliteNode
 	err   error
 }
 

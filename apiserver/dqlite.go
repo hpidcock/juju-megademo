@@ -16,8 +16,10 @@ import (
 	"github.com/juju/errors"
 
 	"github.com/juju/juju/apiserver/authentication"
+	"github.com/juju/juju/apiserver/httpcontext"
 	"github.com/juju/juju/apiserver/websocket"
 	"github.com/juju/juju/core/database"
+	"github.com/juju/juju/core/model"
 	internallogger "github.com/juju/juju/internal/logger"
 )
 
@@ -94,10 +96,11 @@ type dqliteQueryResult struct {
 }
 
 type dqliteHandler struct {
-	ctxt          httpContext
-	authenticator authentication.HTTPAuthenticator
-	authorizer    authentication.Authorizer
-	dbGetter      DBGetter
+	ctxt                httpContext
+	authenticator       authentication.HTTPAuthenticator
+	authorizer          authentication.Authorizer
+	dbGetter            DBGetter
+	controllerModelUUID model.UUID
 }
 
 func newDqliteHandler(
@@ -105,31 +108,47 @@ func newDqliteHandler(
 	authenticator authentication.HTTPAuthenticator,
 	authorizer authentication.Authorizer,
 	dbGetter DBGetter,
+	controllerModelUUID model.UUID,
 ) *dqliteHandler {
 	return &dqliteHandler{
-		ctxt:          ctxt,
-		authenticator: authenticator,
-		authorizer:    authorizer,
-		dbGetter:      dbGetter,
+		ctxt:                ctxt,
+		authenticator:       authenticator,
+		authorizer:          authorizer,
+		dbGetter:            dbGetter,
+		controllerModelUUID: controllerModelUUID,
 	}
 }
 
 func (h *dqliteHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// The /dqlite endpoint is controller-scoped (no model UUID in the
+	// URL). Set the controller model UUID in the request context so
+	// the authenticator can find it.
+	ctx := httpcontext.SetContextModelUUID(req.Context(), h.controllerModelUUID)
+	req = req.WithContext(ctx)
+
 	handler := func(conn *websocket.Conn) {
 		defer conn.Close()
 
 		authInfo, err := h.authenticator.Authenticate(req)
 		if err != nil {
-			h.sendError(conn, "", "", errors.Annotate(err, "authentication failed"))
+			_ = conn.SendInitialErrorV0(errors.Annotate(err, "authentication failed"))
 			return
 		}
 		if err := h.authorizer.Authorize(req.Context(), authInfo); err != nil {
-			h.sendError(conn, "", "", errors.Annotate(err, "authorization failed"))
+			_ = conn.SendInitialErrorV0(errors.Annotate(err, "authorization failed"))
+			return
+		}
+
+		if err := conn.SendInitialErrorV0(nil); err != nil {
+			dqliteLogger.Errorf(req.Context(), "dqlite handler failed to send initial ok: %v", err)
 			return
 		}
 
 		if err := h.versionHandshake(conn); err != nil {
-			h.sendError(conn, serverVersion, "", err)
+			_ = conn.WriteJSON(dqliteResponse{
+				Version:   serverVersion,
+				Error:     err.Error(),
+			})
 			return
 		}
 
@@ -161,18 +180,6 @@ func (h *dqliteHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	websocket.Serve(w, req, handler)
-}
-
-func (h *dqliteHandler) sendError(conn *websocket.Conn, version, requestID string, err error) {
-	if err == nil {
-		return
-	}
-	resp := dqliteResponse{
-		Version:   version,
-		RequestID: requestID,
-		Error:     err.Error(),
-	}
-	conn.WriteJSON(resp)
 }
 
 func (h *dqliteHandler) versionHandshake(conn *websocket.Conn) error {

@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/juju/juju/api/common"
 )
 
 type dqlitePane int
@@ -31,11 +33,11 @@ type dqliteModel struct {
 	preSelectDatabase string
 	defaultLimit      int
 
-	databases  []DqliteDatabase
+	databases  []common.DqliteDatabase
 	selectedDB int
 
 	kind        string
-	objects     []DqliteObject
+	objects     []common.DqliteObject
 	selectedObj int
 
 	ddl string
@@ -47,7 +49,7 @@ type dqliteModel struct {
 	queryTruncated bool
 	queryError     string
 
-	clusterNodes []DqliteNode
+	clusterNodes []common.DqliteNode
 
 	api DqliteAPI
 }
@@ -94,42 +96,7 @@ func NewDqliteModel(api DqliteAPI) *dqliteModel {
 }
 
 func (m *dqliteModel) Init() tea.Cmd {
-	return tea.Batch(tea.EnterAltScreen, m.hardcodedLoadAllCmd())
-}
-
-func (m *dqliteModel) hardcodedLoadAllCmd() tea.Cmd {
-	return func() tea.Msg {
-		return hardcodedAllMsg{
-			databases: []DqliteDatabase{
-				{Name: "controller", Namespace: "controller", Type: "controller"},
-				{Name: "lxd-pilot", UUID: "deadbeef-1234-5678-abcd-1234567890ab", Namespace: "deadbeef-1234-5678-abcd-1234567890ab", Type: "model"},
-			},
-			objects: []DqliteObject{
-				{Name: "change_log", Kind: "table"},
-				{Name: "model", Kind: "table"},
-				{Name: "v_model_status", Kind: "view"},
-			},
-			ddl: "CREATE TABLE change_log (\n  id         INTEGER PRIMARY KEY,\n  edit_type_id INTEGER NOT NULL,\n  ns_id      INTEGER NOT NULL\n)",
-			clusterNodes: []DqliteNode{
-				{ID: "00ab1234", Address: "10.0.0.1:12345", Role: "voter"},
-				{ID: "00cd5678", Address: "10.0.0.2:12345", Role: "stand-by"},
-			},
-			queryResult: &DqliteQueryResult{
-				Columns:   []string{"id", "edit_type_id", "ns_id"},
-				Rows:      [][]string{{"1", "1", "1"}, {"2", "2", "2"}, {"3", "3", "3"}},
-				Count:     3,
-				Truncated: true,
-			},
-		}
-	}
-}
-
-type hardcodedAllMsg struct {
-	databases    []DqliteDatabase
-	objects      []DqliteObject
-	ddl          string
-	clusterNodes []DqliteNode
-	queryResult  *DqliteQueryResult
+	return loadDatabasesCmd(m.api)
 }
 
 func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -141,27 +108,6 @@ func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.err = msg.err.Error()
-		return m, nil
-
-	case hardcodedAllMsg:
-		m.databases = msg.databases
-		m.objects = msg.objects
-		m.ddl = msg.ddl
-		m.clusterNodes = msg.clusterNodes
-		if msg.queryResult != nil {
-			m.queryColumns = msg.queryResult.Columns
-			m.queryRows = msg.queryResult.Rows
-			m.queryCount = msg.queryResult.Count
-			m.queryTruncated = msg.queryResult.Truncated
-		}
-		if m.preSelectDatabase != "" {
-			for i, db := range m.databases {
-				if db.Name == m.preSelectDatabase {
-					m.selectedDB = i
-					break
-				}
-			}
-		}
 		return m, nil
 
 	case loadDatabasesMsg:
@@ -211,7 +157,7 @@ func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.queryColumns = msg.result.Columns
 		m.queryRows = msg.result.Rows
-		m.queryCount = msg.result.Count
+		m.queryCount = msg.result.RowCount
 		m.queryTruncated = msg.result.Truncated
 		m.queryError = ""
 		return m, nil
