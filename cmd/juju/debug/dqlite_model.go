@@ -5,98 +5,59 @@ package debug
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/juju/juju/api/common"
 )
 
-type dqlitePane int
+type dqliteFocus int
 
 const (
-	dqlitePaneDatabases dqlitePane = iota
-	dqlitePaneObjects
-	dqlitePaneQuery
-	dqlitePaneCluster
+	dbFocusDatabases dqliteFocus = iota
+	dbFocusObjects
+	dbFocusDetail
+	numDBFocusZones
 )
 
 type dqliteModel struct {
 	width, height int
-	focus         dqlitePane
-	showHelp      bool
-	quitting      bool
-	err           string
+	focus        dqliteFocus
+	showHelp     bool
+	quitting     bool
+	err          string
 
 	preSelectDatabase string
 	defaultLimit      int
 
-	databases  []common.DqliteDatabase
-	selectedDB int
-
-	kind        string
-	objects     []common.DqliteObject
-	selectedObj int
-
-	ddl string
-
-	queryInput     textarea.Model
-	queryColumns   []string
-	queryRows      [][]string
-	queryCount     int
-	queryTruncated bool
-	queryError     string
-
-	clusterNodes []common.DqliteNode
+	dbList  dqliteDBListModel
+	objList dqliteObjListModel
+	detail  dqliteDetailModel
+	cluster dqliteClusterModel
 
 	api DqliteAPI
 }
 
-var (
-	focusedStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")).
-			Padding(0, 1)
-
-	unfocusedStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Padding(0, 1)
-
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("63"))
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-
-	truncatedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214"))
-
-	helpStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")).
-			Padding(1, 2)
-)
-
 func NewDqliteModel(api DqliteAPI) *dqliteModel {
 	m := &dqliteModel{
-		focus:        dqlitePaneDatabases,
-		kind:         "table",
+		focus:        dbFocusDatabases,
 		api:          api,
 		defaultLimit: 100,
 	}
-	m.queryInput = textarea.New()
-	m.queryInput.Placeholder = "SELECT ..."
-	m.queryInput.ShowLineNumbers = false
-	m.queryInput.CharLimit = 0
+	m.dbList = newDqliteDBListModel()
+	m.objList = newDqliteObjListModel()
+	m.detail = newDqliteDetailModel()
+	m.cluster = newDqliteClusterModel()
+	m.syncActiveState()
 	return m
 }
 
 func (m *dqliteModel) Init() tea.Cmd {
-	return loadDatabasesCmd(m.api)
+	return tea.Batch(
+		tea.EnterAltScreen,
+		loadDatabasesCmd(m.api),
+	)
 }
 
 func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -104,10 +65,7 @@ func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
-
-	case errMsg:
-		m.err = msg.err.Error()
+		m.layoutSubviews(msg)
 		return m, nil
 
 	case loadDatabasesMsg:
@@ -115,19 +73,21 @@ func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 			return m, nil
 		}
-		m.databases = msg.databases
+		m.dbList.databases = deduplicateDatabases(msg.databases)
 		if m.preSelectDatabase != "" {
-			for i, db := range m.databases {
+			for i, db := range m.dbList.databases {
 				if db.Name == m.preSelectDatabase {
-					m.selectedDB = i
+					m.dbList.cursor = i
 					break
 				}
 			}
 		}
-		if len(m.databases) > 0 {
-			db := m.databases[m.selectedDB]
+		m.dbList.clampCursor()
+		m.dbList.refreshViewport()
+		if len(m.dbList.databases) > 0 {
+			db := m.dbList.databases[m.dbList.cursor]
 			return m, tea.Batch(
-				loadObjectsCmd(m.api, db.Namespace, m.kind),
+				loadObjectsCmd(m.api, db.Namespace, m.objList.kind),
 				loadClusterCmd(m.api),
 			)
 		}
@@ -138,8 +98,9 @@ func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 			return m, nil
 		}
-		m.objects = msg.objects
-		m.selectedObj = 0
+		m.objList.objects = msg.objects
+		m.objList.cursor = 0
+		m.objList.refreshViewport()
 		return m, nil
 
 	case loadDDLMsg:
@@ -147,19 +108,27 @@ func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 			return m, nil
 		}
-		m.ddl = msg.ddl
+		m.detail.ddl = msg.ddl
+		if m.detail.ready {
+			m.detail.ddlViewport.SetContent(m.detail.ddl)
+			m.detail.ddlViewport.GotoTop()
+		}
 		return m, nil
 
 	case loadQueryMsg:
 		if msg.err != nil {
-			m.queryError = msg.err.Error()
-			return m, nil
+			m.detail.queryError = msg.err.Error()
+		} else if msg.result != nil {
+			m.detail.queryColumns = msg.result.Columns
+			m.detail.queryRows = msg.result.Rows
+			m.detail.queryCount = msg.result.RowCount
+			m.detail.queryTruncated = msg.result.Truncated
+			m.detail.queryError = ""
 		}
-		m.queryColumns = msg.result.Columns
-		m.queryRows = msg.result.Rows
-		m.queryCount = msg.result.RowCount
-		m.queryTruncated = msg.result.Truncated
-		m.queryError = ""
+		if m.detail.ready {
+			m.detail.resultsViewport.SetContent(m.detail.renderResults())
+			m.detail.resultsViewport.GotoTop()
+		}
 		return m, nil
 
 	case loadClusterMsg:
@@ -167,20 +136,35 @@ func (m *dqliteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 			return m, nil
 		}
-		m.clusterNodes = msg.nodes
+		m.cluster.nodes = msg.nodes
+		return m, nil
+
+	case errMsg:
+		m.err = msg.err.Error()
 		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
-	if m.focus == dqlitePaneQuery {
-		var cmd tea.Cmd
-		m.queryInput, cmd = m.queryInput.Update(msg)
-		return m, cmd
-	}
+	return m.propagate(msg)
+}
 
-	return m, nil
+func deduplicateDatabases(dbs []common.DqliteDatabase) []common.DqliteDatabase {
+	controllerNames := make(map[string]bool)
+	for _, db := range dbs {
+		if db.Type == "controller" {
+			controllerNames[db.Name] = true
+		}
+	}
+	var result []common.DqliteDatabase
+	for _, db := range dbs {
+		if db.Type == "model" && controllerNames[db.Name] {
+			continue
+		}
+		result = append(result, db)
+	}
+	return result
 }
 
 func (m *dqliteModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -197,11 +181,13 @@ func (m *dqliteModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.reloadActivePane()
 
 	case "tab":
-		m.focus = (m.focus + 1) % 4
+		m.focus = (m.focus + 1) % numDBFocusZones
+		m.syncActiveState()
 		return m, nil
 
 	case "shift+tab":
-		m.focus = (m.focus + 3) % 4
+		m.focus = (m.focus - 1 + numDBFocusZones) % numDBFocusZones
+		m.syncActiveState()
 		return m, nil
 
 	case "esc":
@@ -209,8 +195,8 @@ func (m *dqliteModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		}
-		if m.focus == dqlitePaneQuery {
-			m.queryInput.Blur()
+		if m.focus == dbFocusDetail {
+			m.detail.queryInput.Blur()
 			return m, nil
 		}
 		m.err = ""
@@ -218,114 +204,156 @@ func (m *dqliteModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.focus {
-	case dqlitePaneDatabases:
-		return m.handleDatabaseKeys(msg)
-	case dqlitePaneObjects:
-		return m.handleObjectKeys(msg)
-	case dqlitePaneQuery:
-		return m.handleQueryKeys(msg)
-	case dqlitePaneCluster:
-		return m, nil
+	case dbFocusDatabases:
+		return m.handleDBFocusKeys(msg)
+	case dbFocusObjects:
+		return m.handleObjFocusKeys(msg)
+	case dbFocusDetail:
+		return m.handleDetailFocusKeys(msg)
 	}
 
 	return m, nil
 }
 
-func (m *dqliteModel) handleDatabaseKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *dqliteModel) handleDBFocusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "up":
-		if m.selectedDB > 0 {
-			m.selectedDB--
-		}
-		return m, nil
-	case "down":
-		if m.selectedDB < len(m.databases)-1 {
-			m.selectedDB++
-		}
-		return m, nil
+	case "up", "down":
+		var cmd tea.Cmd
+		m.dbList, cmd = m.dbList.Update(msg)
+		return m, cmd
 	case "enter":
-		if len(m.databases) == 0 {
+		if len(m.dbList.databases) == 0 {
 			return m, nil
 		}
-		db := m.databases[m.selectedDB]
-		return m, loadObjectsCmd(m.api, db.Namespace, m.kind)
+		db := m.dbList.databases[m.dbList.cursor]
+		return m, loadObjectsCmd(m.api, db.Namespace, m.objList.kind)
 	}
 	return m, nil
 }
 
-func (m *dqliteModel) handleObjectKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *dqliteModel) handleObjFocusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "up":
-		if m.selectedObj > 0 {
-			m.selectedObj--
-		}
-		return m, nil
-	case "down":
-		if m.selectedObj < len(m.objects)-1 {
-			m.selectedObj++
-		}
-		return m, nil
+	case "up", "down":
+		var cmd tea.Cmd
+		m.objList, cmd = m.objList.Update(msg)
+		return m, cmd
 	case "ctrl+1":
-		m.kind = "table"
+		m.objList.kind = "table"
 		return m, m.reloadObjects()
 	case "ctrl+2":
-		m.kind = "view"
+		m.objList.kind = "view"
 		return m, m.reloadObjects()
 	case "ctrl+3":
-		m.kind = "trigger"
+		m.objList.kind = "trigger"
 		return m, m.reloadObjects()
 	case "enter":
-		if len(m.objects) == 0 {
+		if len(m.objList.objects) == 0 || len(m.dbList.databases) == 0 {
 			return m, nil
 		}
-		obj := m.objects[m.selectedObj]
-		db := m.databases[m.selectedDB]
+		obj := m.objList.objects[m.objList.cursor]
+		db := m.dbList.databases[m.dbList.cursor]
 		return m, loadDDLCmd(m.api, db.Namespace, obj.Name)
 	}
 	return m, nil
 }
 
-func (m *dqliteModel) handleQueryKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *dqliteModel) handleDetailFocusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+enter":
-		if len(m.databases) == 0 {
+		if len(m.dbList.databases) == 0 {
 			return m, nil
 		}
-		db := m.databases[m.selectedDB]
-		return m, loadQueryCmd(m.api, db.Namespace, m.queryInput.Value(), m.defaultLimit)
+		db := m.dbList.databases[m.dbList.cursor]
+		return m, loadQueryCmd(m.api, db.Namespace, m.detail.queryInput.Value(), m.defaultLimit)
 	default:
 		var cmd tea.Cmd
-		m.queryInput, cmd = m.queryInput.Update(msg)
+		m.detail, cmd = m.detail.Update(msg)
 		return m, cmd
 	}
 }
 
 func (m *dqliteModel) reloadActivePane() tea.Cmd {
-	if len(m.databases) == 0 {
+	if len(m.dbList.databases) == 0 {
 		return nil
 	}
-	db := m.databases[m.selectedDB]
+	db := m.dbList.databases[m.dbList.cursor]
 	switch m.focus {
-	case dqlitePaneDatabases:
+	case dbFocusDatabases:
 		return loadDatabasesCmd(m.api)
-	case dqlitePaneObjects:
-		return loadObjectsCmd(m.api, db.Namespace, m.kind)
-	case dqlitePaneQuery:
-		if m.queryInput.Value() != "" {
-			return loadQueryCmd(m.api, db.Namespace, m.queryInput.Value(), m.defaultLimit)
+	case dbFocusObjects:
+		return loadObjectsCmd(m.api, db.Namespace, m.objList.kind)
+	case dbFocusDetail:
+		if m.detail.queryInput.Value() != "" {
+			return loadQueryCmd(m.api, db.Namespace, m.detail.queryInput.Value(), m.defaultLimit)
 		}
-	case dqlitePaneCluster:
+	}
+	if m.focus == dbFocusDatabases || m.focus == dbFocusObjects {
 		return loadClusterCmd(m.api)
 	}
 	return nil
 }
 
 func (m *dqliteModel) reloadObjects() tea.Cmd {
-	if len(m.databases) == 0 {
+	if len(m.dbList.databases) == 0 {
 		return nil
 	}
-	db := m.databases[m.selectedDB]
-	return loadObjectsCmd(m.api, db.Namespace, m.kind)
+	db := m.dbList.databases[m.dbList.cursor]
+	return loadObjectsCmd(m.api, db.Namespace, m.objList.kind)
+}
+
+func (m *dqliteModel) syncActiveState() {
+	m.dbList.active = m.focus == dbFocusDatabases
+	m.objList.active = m.focus == dbFocusObjects
+	m.detail.active = m.focus == dbFocusDetail
+	if m.detail.active {
+		m.detail.queryInput.Focus()
+	} else {
+		m.detail.queryInput.Blur()
+	}
+}
+
+func (m *dqliteModel) layoutSubviews(msg tea.WindowSizeMsg) {
+	contextBarH := 1
+	clusterBarH := 3
+	mainH := m.height - contextBarH - clusterBarH
+
+	leftW := m.width * 30 / 100
+	rightW := m.width - leftW
+
+	dbListH := mainH * 40 / 100
+	objListH := mainH - dbListH
+
+	m.dbList.width = leftW
+	m.dbList.height = dbListH
+	m.objList.width = leftW
+	m.objList.height = objListH
+	m.detail.width = rightW
+	m.detail.height = mainH
+	m.cluster.width = m.width
+
+	dbVpMsg := tea.WindowSizeMsg{Width: leftW, Height: dbListH}
+	objVpMsg := tea.WindowSizeMsg{Width: leftW, Height: objListH}
+	detailVpMsg := tea.WindowSizeMsg{Width: rightW, Height: mainH}
+
+	m.dbList, _ = m.dbList.Update(dbVpMsg)
+	m.objList, _ = m.objList.Update(objVpMsg)
+	m.detail, _ = m.detail.Update(detailVpMsg)
+}
+
+func (m *dqliteModel) propagate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	var cmd tea.Cmd
+
+	m.dbList, cmd = m.dbList.Update(msg)
+	cmds = append(cmds, cmd)
+
+	m.objList, cmd = m.objList.Update(msg)
+	cmds = append(cmds, cmd)
+
+	m.detail, cmd = m.detail.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
 }
 
 func (m *dqliteModel) View() string {
@@ -341,232 +369,101 @@ func (m *dqliteModel) View() string {
 		return "Loading..."
 	}
 
-	dbPane := m.viewDatabasesPane()
-	objPane := m.viewObjectsPane()
-	queryPane := m.viewQueryPane()
-	clusterPane := m.viewClusterPane()
+	contextBar := m.viewContextBar()
 
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, dbPane, objPane, queryPane)
-	fullView := lipgloss.JoinVertical(lipgloss.Left, topRow, clusterPane)
+	leftCol := lipgloss.JoinVertical(lipgloss.Left, m.dbList.View(), m.objList.View())
+	rightCol := m.detail.View()
+	mainRow := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, rightCol)
 
-	statusBar := m.viewStatusBar()
+	clusterBar := m.cluster.View()
 
-	return lipgloss.JoinVertical(lipgloss.Left, fullView, statusBar)
-}
-
-func (m *dqliteModel) paneStyle(pane dqlitePane) lipgloss.Style {
-	if m.focus == pane {
-		return focusedStyle
-	}
-	return unfocusedStyle
-}
-
-func (m *dqliteModel) viewDatabasesPane() string {
-	paneWidth := m.width / 5
-	paneHeight := m.height * 2 / 3 - 2
-
-	style := m.paneStyle(dqlitePaneDatabases).Width(paneWidth).Height(paneHeight)
-
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Databases"))
-	b.WriteString("\n")
-
-	if len(m.databases) == 0 {
-		b.WriteString("  (none)\n")
-	} else {
-		for i, db := range m.databases {
-			cursor := " "
-			if i == m.selectedDB {
-				cursor = ">"
-			}
-			selected := " "
-			if i == m.selectedDB {
-				selected = "*"
-			}
-			b.WriteString(fmt.Sprintf(" %s%s %s\n", cursor, selected, db.Name))
-		}
-	}
-
-	return style.Render(b.String())
-}
-
-func (m *dqliteModel) viewObjectsPane() string {
-	paneWidth := m.width / 5
-	paneHeight := m.height * 2 / 3 - 2
-
-	style := m.paneStyle(dqlitePaneObjects).Width(paneWidth).Height(paneHeight)
-
-	var b strings.Builder
-	kindLabel := "Tables"
-	switch m.kind {
-	case "view":
-		kindLabel = "Views"
-	case "trigger":
-		kindLabel = "Triggers"
-	}
-	b.WriteString(titleStyle.Render(fmt.Sprintf("Objects [%s]", kindLabel)))
-	b.WriteString("\n")
-
-	if len(m.objects) == 0 {
-		b.WriteString("  (none)\n")
-	} else {
-		for i, obj := range m.objects {
-			cursor := " "
-			if i == m.selectedObj {
-				cursor = ">"
-			}
-			b.WriteString(fmt.Sprintf(" %s %s\n", cursor, obj.Name))
-		}
-	}
-
-	return style.Render(b.String())
-}
-
-func (m *dqliteModel) viewQueryPane() string {
-	paneWidth := m.width * 3 / 5 - 4
-	paneHeight := m.height * 2 / 3 - 2
-
-	style := m.paneStyle(dqlitePaneQuery).Width(paneWidth).Height(paneHeight)
-
-	var b strings.Builder
-
-	b.WriteString(titleStyle.Render("DDL / Query"))
-	b.WriteString("\n")
-
-	if m.ddl != "" {
-		b.WriteString(m.ddl)
-		b.WriteString("\n")
-	} else {
-		b.WriteString("(select an object to view DDL)\n")
-	}
-
-	b.WriteString(strings.Repeat("─", min(paneWidth, 60)))
-	b.WriteString("\n")
-
-	if m.focus == dqlitePaneQuery {
-		b.WriteString(m.queryInput.View())
-	} else {
-		b.WriteString(m.queryInput.Value())
-		if m.queryInput.Value() == "" {
-			b.WriteString("SELECT ...")
-		}
-	}
-	b.WriteString("  [^ENTER]\n")
-
-	b.WriteString(strings.Repeat("─", min(paneWidth, 60)))
-	b.WriteString("\n")
-
-	if m.queryError != "" {
-		b.WriteString(errorStyle.Render(m.queryError))
-		b.WriteString("\n")
-	} else if len(m.queryColumns) > 0 {
-		b.WriteString(m.renderResultsTable())
-	}
-
-	return style.Render(b.String())
-}
-
-func (m *dqliteModel) renderResultsTable() string {
-	var b strings.Builder
-
-	colWidths := make([]int, len(m.queryColumns))
-	for i, col := range m.queryColumns {
-		colWidths[i] = len(col)
-	}
-	for _, row := range m.queryRows {
-		for i, cell := range row {
-			if i < len(colWidths) && len(cell) > colWidths[i] {
-				colWidths[i] = len(cell)
-			}
-		}
-	}
-
-	headerParts := make([]string, len(m.queryColumns))
-	for i, col := range m.queryColumns {
-		headerParts[i] = fmt.Sprintf("%-*s", colWidths[i], col)
-	}
-	b.WriteString(" ")
-	b.WriteString(strings.Join(headerParts, " │ "))
-	b.WriteString("\n")
-
-	sepParts := make([]string, len(m.queryColumns))
-	for i := range m.queryColumns {
-		sepParts[i] = strings.Repeat("─", colWidths[i])
-	}
-	b.WriteString(" ")
-	b.WriteString(strings.Join(sepParts, "─┼─"))
-	b.WriteString("\n")
-
-	for _, row := range m.queryRows {
-		cellParts := make([]string, len(row))
-		for i, cell := range row {
-			w := 0
-			if i < len(colWidths) {
-				w = colWidths[i]
-			}
-			cellParts[i] = fmt.Sprintf("%-*s", w, cell)
-		}
-		b.WriteString(" ")
-		b.WriteString(strings.Join(cellParts, " │ "))
-		b.WriteString("\n")
-	}
-
-	b.WriteString(fmt.Sprintf(" %d rows", m.queryCount))
-	if m.queryTruncated {
-		b.WriteString(truncatedStyle.Render("  (truncated)"))
-	}
-	b.WriteString("\n")
-
-	return b.String()
-}
-
-func (m *dqliteModel) viewClusterPane() string {
-	paneWidth := m.width - 4
-	paneHeight := m.height / 3 - 2
-
-	style := m.paneStyle(dqlitePaneCluster).Width(paneWidth).Height(paneHeight)
-
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Cluster"))
-	b.WriteString("\n")
-
-	if len(m.clusterNodes) == 0 {
-		b.WriteString("  (no cluster info)\n")
-	} else {
-		idW, addrW := 20, 30
-		b.WriteString(fmt.Sprintf(" %-20s  %-30s  %s\n", "ID", "Address", "Role"))
-		b.WriteString(fmt.Sprintf(" %s  %s  %s\n",
-			strings.Repeat("─", idW), strings.Repeat("─", addrW), strings.Repeat("─", 10)))
-		for _, node := range m.clusterNodes {
-			b.WriteString(fmt.Sprintf(" %-20s  %-30s  %s\n", node.ID, node.Address, node.Role))
-		}
-	}
-
-	return style.Render(b.String())
-}
-
-func (m *dqliteModel) viewStatusBar() string {
-	var b strings.Builder
-	b.WriteString(" ^1/^2/^3 obj kind")
-	b.WriteString("  Tab focus")
-	b.WriteString("  ^R refresh")
-	b.WriteString("  ^H help")
-	b.WriteString("  ^C quit")
+	view := lipgloss.JoinVertical(lipgloss.Left, contextBar, mainRow, clusterBar)
 
 	if m.err != "" {
-		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(m.err))
+		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		view += "\n" + errStyle.Render(m.err)
 	}
 
-	return b.String()
+	return view
+}
+
+func (m *dqliteModel) viewContextBar() string {
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	valueStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
+	shortcutStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("228"))
+
+	barStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("235")).
+		Padding(0, 1).
+		Width(m.width)
+
+	left := lipgloss.JoinHorizontal(lipgloss.Top,
+		labelStyle.Render("Controller: "),
+		valueStyle.Render("mycontroller"),
+	)
+
+	right := shortcutStyle.Render("[Tab] focus  [^H] help  [^C] quit")
+
+	fullWidth := lipgloss.Width(left) + lipgloss.Width(right) + 4
+	if fullWidth < m.width {
+		padding := m.width - fullWidth
+		right = lipgloss.NewStyle().PaddingLeft(padding).Render(right)
+	}
+
+	bar := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	return barStyle.Render(bar)
 }
 
 func (m *dqliteModel) viewHelp() string {
-	helpText := `  Tab          Next pane                   Ctrl+1..3  Object kind
-  Shift+Tab    Previous pane               Ctrl+H     This help
-  ↑/↓          Navigate list               Ctrl+R     Refresh pane
-  Enter        Select database / object    Esc        Dismiss
-  Ctrl+Enter   Execute query              Ctrl+C     Quit`
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(1, 2).
+		Width(m.width - 4).
+		Height(m.height - 4)
 
-	return helpStyle.Render(helpText)
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("228")).
+		MarginBottom(1)
+
+	keyStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("86"))
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252"))
+
+	helpText := titleStyle.Render("Keybindings") + "\n\n"
+
+	bindings := []struct {
+		key  string
+		desc string
+	}{
+		{"Tab", "Switch pane"},
+		{"Shift+Tab", "Previous pane"},
+		{"↑ / ↓", "Navigate list / scroll"},
+		{"Enter", "Select database / object"},
+		{"Ctrl+Enter", "Execute query"},
+		{"Ctrl+1..3", "Object kind (tables/views/triggers)"},
+		{"Ctrl+R", "Refresh pane"},
+		{"Ctrl+H", "This help"},
+		{"Esc", "Dismiss"},
+		{"Ctrl+C", "Quit"},
+	}
+
+	for _, b := range bindings {
+		helpText += fmt.Sprintf("  %s  %s\n",
+			keyStyle.Render(fmt.Sprintf("%-14s", b.key)),
+			descStyle.Render(b.desc),
+		)
+	}
+
+	helpText += "\n" + descStyle.Render("Press Esc to close this overlay.")
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		borderStyle.Render(helpText),
+		lipgloss.WithWhitespaceChars(" "),
+	)
 }

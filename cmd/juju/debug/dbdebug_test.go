@@ -25,10 +25,6 @@ func TestDbDebugSuite(t *stdtesting.T) {
 	tc.Run(t, &dbDebugSuite{})
 }
 
-// ---------------------------------------------------------------------------
-// Command tests (Task 2)
-// ---------------------------------------------------------------------------
-
 func (s *dbDebugSuite) TestInfoName(c *tc.C) {
 	d := newDbDebugCommand()
 	info := d.Info()
@@ -89,23 +85,19 @@ func newDbDebugCommand() *dbDebugCommand {
 	return &dbDebugCommand{limit: 100}
 }
 
-// ---------------------------------------------------------------------------
-// Mock API
-// ---------------------------------------------------------------------------
-
 type recordedMockAPI struct {
 	databases    []common.DqliteDatabase
 	databasesErr error
 
-	objects    []common.DqliteObject
-	objectsErr error
+	objects     []common.DqliteObject
+	objectsErr  error
 	objectsCalls []struct {
 		ns   string
 		kind string
 	}
 
-	ddl     string
-	ddlErr  error
+	ddl      string
+	ddlErr   error
 	ddlCalls []struct {
 		ns   string
 		name string
@@ -161,30 +153,20 @@ func (a *recordedMockAPI) Cluster(_ context.Context) ([]common.DqliteNode, error
 	return a.clusterNodes, a.clusterErr
 }
 
-// step runs model.Update and returns the model re-typed to *dqliteModel.
 func step(m *dqliteModel, msg tea.Msg) (*dqliteModel, tea.Cmd) {
 	n, cmd := m.Update(msg)
 	return n.(*dqliteModel), cmd
 }
 
-// execCmd calls the Cmd and returns the result message.
 func execCmd(cmd tea.Cmd) tea.Msg {
 	return cmd()
 }
-
-// ---------------------------------------------------------------------------
-// Init test
-// ---------------------------------------------------------------------------
 
 func (s *dbDebugSuite) TestInit(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	cmd := m.Init()
 	c.Check(cmd, tc.NotNil)
 }
-
-// ---------------------------------------------------------------------------
-// load*Msg handler tests
-// ---------------------------------------------------------------------------
 
 func (s *dbDebugSuite) TestLoadDatabasesMsgPopulates(c *tc.C) {
 	mock := &recordedMockAPI{
@@ -199,9 +181,9 @@ func (s *dbDebugSuite) TestLoadDatabasesMsgPopulates(c *tc.C) {
 		{Name: "controller", Namespace: "controller", Type: "controller"},
 	}
 	m, cmd := step(m, loadDatabasesMsg{databases: dbs})
-	c.Check(len(m.databases), tc.Equals, 1)
-	c.Check(m.databases[0].Name, tc.Equals, "controller")
-	c.Check(m.selectedDB, tc.Equals, 0)
+	c.Check(len(m.dbList.databases), tc.Equals, 1)
+	c.Check(m.dbList.databases[0].Name, tc.Equals, "controller")
+	c.Check(m.dbList.cursor, tc.Equals, 0)
 	c.Check(cmd, tc.NotNil)
 }
 
@@ -220,7 +202,7 @@ func (s *dbDebugSuite) TestLoadDatabasesMsgPreselectMatches(c *tc.C) {
 		{Name: "lxd-pilot", Namespace: "ns2", Type: "model"},
 	}
 	m, cmd := step(m, loadDatabasesMsg{databases: dbs})
-	c.Check(m.selectedDB, tc.Equals, 1)
+	c.Check(m.dbList.cursor, tc.Equals, 1)
 	c.Check(cmd, tc.NotNil)
 }
 
@@ -238,7 +220,7 @@ func (s *dbDebugSuite) TestLoadDatabasesMsgPreselectNoMatch(c *tc.C) {
 		{Name: "controller", Namespace: "ctrl", Type: "controller"},
 	}
 	m, cmd := step(m, loadDatabasesMsg{databases: dbs})
-	c.Check(m.selectedDB, tc.Equals, 0)
+	c.Check(m.dbList.cursor, tc.Equals, 0)
 	c.Check(cmd, tc.NotNil)
 }
 
@@ -255,8 +237,22 @@ func (s *dbDebugSuite) TestLoadDatabasesMsgEmpty(c *tc.C) {
 	m.height = 40
 
 	m, cmd := step(m, loadDatabasesMsg{})
-	c.Check(len(m.databases), tc.Equals, 0)
+	c.Check(len(m.dbList.databases), tc.Equals, 0)
 	c.Check(cmd, tc.IsNil)
+}
+
+func (s *dbDebugSuite) TestDeduplicateDatabases(c *tc.C) {
+	input := []common.DqliteDatabase{
+		{Name: "controller", Namespace: "controller", Type: "controller"},
+		{Name: "controller", UUID: "uuid-ctrl", Namespace: "uuid-ctrl", Type: "model"},
+		{Name: "mymodel", UUID: "uuid-model", Namespace: "uuid-model", Type: "model"},
+	}
+	got := deduplicateDatabases(input)
+	c.Check(len(got), tc.Equals, 2)
+	c.Check(got[0].Name, tc.Equals, "controller")
+	c.Check(got[0].Type, tc.Equals, "controller")
+	c.Check(got[1].Name, tc.Equals, "mymodel")
+	c.Check(got[1].Type, tc.Equals, "model")
 }
 
 func (s *dbDebugSuite) TestLoadObjectsMsgPopulates(c *tc.C) {
@@ -266,9 +262,9 @@ func (s *dbDebugSuite) TestLoadObjectsMsgPopulates(c *tc.C) {
 		{Name: "bar", Kind: "view"},
 	}
 	m, _ = step(m, loadObjectsMsg{objects: objs})
-	c.Check(len(m.objects), tc.Equals, 2)
-	c.Check(m.objects[0].Name, tc.Equals, "foo")
-	c.Check(m.selectedObj, tc.Equals, 0)
+	c.Check(len(m.objList.objects), tc.Equals, 2)
+	c.Check(m.objList.objects[0].Name, tc.Equals, "foo")
+	c.Check(m.objList.cursor, tc.Equals, 0)
 }
 
 func (s *dbDebugSuite) TestLoadObjectsMsgError(c *tc.C) {
@@ -281,7 +277,7 @@ func (s *dbDebugSuite) TestLoadObjectsMsgError(c *tc.C) {
 func (s *dbDebugSuite) TestLoadDDLMsgPopulates(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m, _ = step(m, loadDDLMsg{ddl: "CREATE TABLE t (id INTEGER)"})
-	c.Check(m.ddl, tc.Equals, "CREATE TABLE t (id INTEGER)")
+	c.Check(m.detail.ddl, tc.Equals, "CREATE TABLE t (id INTEGER)")
 }
 
 func (s *dbDebugSuite) TestLoadDDLMsgError(c *tc.C) {
@@ -293,7 +289,7 @@ func (s *dbDebugSuite) TestLoadDDLMsgError(c *tc.C) {
 
 func (s *dbDebugSuite) TestLoadQueryMsgPopulates(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
-	m.queryError = "previous error"
+	m.detail.queryError = "previous error"
 	result := &common.DqliteQueryResult{
 		Columns:   []string{"c1", "c2"},
 		Rows:      [][]string{{"a", "b"}, {"c", "d"}},
@@ -301,17 +297,17 @@ func (s *dbDebugSuite) TestLoadQueryMsgPopulates(c *tc.C) {
 		Truncated: true,
 	}
 	m, _ = step(m, loadQueryMsg{result: result})
-	c.Check(len(m.queryColumns), tc.Equals, 2)
-	c.Check(len(m.queryRows), tc.Equals, 2)
-	c.Check(m.queryCount, tc.Equals, 2)
-	c.Check(m.queryTruncated, tc.IsTrue)
-	c.Check(m.queryError, tc.Equals, "")
+	c.Check(len(m.detail.queryColumns), tc.Equals, 2)
+	c.Check(len(m.detail.queryRows), tc.Equals, 2)
+	c.Check(m.detail.queryCount, tc.Equals, 2)
+	c.Check(m.detail.queryTruncated, tc.IsTrue)
+	c.Check(m.detail.queryError, tc.Equals, "")
 }
 
 func (s *dbDebugSuite) TestLoadQueryMsgError(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m, cmd := step(m, loadQueryMsg{err: errors.New("query failed")})
-	c.Check(m.queryError, tc.Equals, "query failed")
+	c.Check(m.detail.queryError, tc.Equals, "query failed")
 	c.Check(m.err, tc.Equals, "")
 	c.Check(cmd, tc.IsNil)
 }
@@ -322,8 +318,8 @@ func (s *dbDebugSuite) TestLoadClusterMsgPopulates(c *tc.C) {
 		{ID: "aa", Address: "10.0.0.1:12345", Role: "voter"},
 	}
 	m, _ = step(m, loadClusterMsg{nodes: nodes})
-	c.Check(len(m.clusterNodes), tc.Equals, 1)
-	c.Check(m.clusterNodes[0].ID, tc.Equals, "aa")
+	c.Check(len(m.cluster.nodes), tc.Equals, 1)
+	c.Check(m.cluster.nodes[0].ID, tc.Equals, "aa")
 }
 
 func (s *dbDebugSuite) TestLoadClusterMsgError(c *tc.C) {
@@ -339,28 +335,21 @@ func (s *dbDebugSuite) TestErrMsg(c *tc.C) {
 	c.Check(m.err, tc.Equals, "something went wrong")
 }
 
-// ---------------------------------------------------------------------------
-// Key binding tests
-// ---------------------------------------------------------------------------
-
 func (s *dbDebugSuite) TestTabCyclesFocus(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
 
-	c.Check(m.focus, tc.Equals, dqlitePaneDatabases)
+	c.Check(m.focus, tc.Equals, dbFocusDatabases)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneObjects)
+	c.Check(m.focus, tc.Equals, dbFocusObjects)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneQuery)
+	c.Check(m.focus, tc.Equals, dbFocusDetail)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneCluster)
-
-	m, _ = step(m, tea.KeyMsg{Type: tea.KeyTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneDatabases)
+	c.Check(m.focus, tc.Equals, dbFocusDatabases)
 }
 
 func (s *dbDebugSuite) TestShiftTabCyclesFocus(c *tc.C) {
@@ -368,73 +357,72 @@ func (s *dbDebugSuite) TestShiftTabCyclesFocus(c *tc.C) {
 	m.width = 120
 	m.height = 50
 
-	c.Check(m.focus, tc.Equals, dqlitePaneDatabases)
+	c.Check(m.focus, tc.Equals, dbFocusDatabases)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneCluster)
+	c.Check(m.focus, tc.Equals, dbFocusDetail)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneQuery)
+	c.Check(m.focus, tc.Equals, dbFocusObjects)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneObjects)
-
-	m, _ = step(m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	c.Check(m.focus, tc.Equals, dqlitePaneDatabases)
+	c.Check(m.focus, tc.Equals, dbFocusDatabases)
 }
 
 func (s *dbDebugSuite) TestUpDownDatabases(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{
+	m.dbList.databases = []common.DqliteDatabase{
 		{Name: "db1", Namespace: "ns1"},
 		{Name: "db2", Namespace: "ns2"},
 		{Name: "db3", Namespace: "ns3"},
 	}
-	m.focus = dqlitePaneDatabases
+	m.focus = dbFocusDatabases
+	m.syncActiveState()
 
-	c.Check(m.selectedDB, tc.Equals, 0)
-
-	m, _ = step(m, tea.KeyMsg{Type: tea.KeyDown})
-	c.Check(m.selectedDB, tc.Equals, 1)
+	c.Check(m.dbList.cursor, tc.Equals, 0)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyDown})
-	c.Check(m.selectedDB, tc.Equals, 2)
+	c.Check(m.dbList.cursor, tc.Equals, 1)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyDown})
-	c.Check(m.selectedDB, tc.Equals, 2)
+	c.Check(m.dbList.cursor, tc.Equals, 2)
+
+	m, _ = step(m, tea.KeyMsg{Type: tea.KeyDown})
+	c.Check(m.dbList.cursor, tc.Equals, 2)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyUp})
-	c.Check(m.selectedDB, tc.Equals, 1)
+	c.Check(m.dbList.cursor, tc.Equals, 1)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyUp})
-	c.Check(m.selectedDB, tc.Equals, 0)
+	c.Check(m.dbList.cursor, tc.Equals, 0)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyUp})
-	c.Check(m.selectedDB, tc.Equals, 0)
+	c.Check(m.dbList.cursor, tc.Equals, 0)
 }
 
 func (s *dbDebugSuite) TestUpDownObjects(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.objects = []common.DqliteObject{
+	m.objList.objects = []common.DqliteObject{
 		{Name: "obj1", Kind: "table"},
 		{Name: "obj2", Kind: "table"},
 	}
-	m.focus = dqlitePaneObjects
+	m.focus = dbFocusObjects
+	m.syncActiveState()
 
-	c.Check(m.selectedObj, tc.Equals, 0)
-
-	m, _ = step(m, tea.KeyMsg{Type: tea.KeyDown})
-	c.Check(m.selectedObj, tc.Equals, 1)
+	c.Check(m.objList.cursor, tc.Equals, 0)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyDown})
-	c.Check(m.selectedObj, tc.Equals, 1)
+	c.Check(m.objList.cursor, tc.Equals, 1)
+
+	m, _ = step(m, tea.KeyMsg{Type: tea.KeyDown})
+	c.Check(m.objList.cursor, tc.Equals, 1)
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyUp})
-	c.Check(m.selectedObj, tc.Equals, 0)
+	c.Check(m.objList.cursor, tc.Equals, 0)
 }
 
 func (s *dbDebugSuite) TestEnterDatabasesFiresLoadObjects(c *tc.C) {
@@ -444,8 +432,9 @@ func (s *dbDebugSuite) TestEnterDatabasesFiresLoadObjects(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.focus = dqlitePaneDatabases
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusDatabases
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyEnter})
 	c.Assert(cmd, tc.NotNil)
@@ -460,7 +449,8 @@ func (s *dbDebugSuite) TestEnterDatabasesEmpty(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.focus = dqlitePaneDatabases
+	m.focus = dbFocusDatabases
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyEnter})
 	c.Check(cmd, tc.IsNil)
@@ -471,9 +461,10 @@ func (s *dbDebugSuite) TestEnterObjectsFiresLoadDDL(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.objects = []common.DqliteObject{{Name: "foo", Kind: "table"}}
-	m.focus = dqlitePaneObjects
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.objList.objects = []common.DqliteObject{{Name: "foo", Kind: "table"}}
+	m.focus = dbFocusObjects
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyEnter})
 	c.Assert(cmd, tc.NotNil)
@@ -489,7 +480,8 @@ func (s *dbDebugSuite) TestEnterObjectsEmpty(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.focus = dqlitePaneObjects
+	m.focus = dbFocusObjects
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyEnter})
 	c.Check(cmd, tc.IsNil)
@@ -535,11 +527,12 @@ func (s *dbDebugSuite) TestEscBlursQuery(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.focus = dqlitePaneQuery
+	m.focus = dbFocusDetail
+	m.syncActiveState()
 
 	m, _ = step(m, tea.KeyMsg{Type: tea.KeyEsc})
-	c.Check(m.queryInput.Focused(), tc.IsFalse)
-	c.Check(m.focus, tc.Equals, dqlitePaneQuery)
+	c.Check(m.detail.queryInput.Focused(), tc.IsFalse)
+	c.Check(m.focus, tc.Equals, dbFocusDetail)
 }
 
 func (s *dbDebugSuite) TestEscClearsError(c *tc.C) {
@@ -557,8 +550,8 @@ func (s *dbDebugSuite) TestAlphanumericKeysInQuery(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.focus = dqlitePaneQuery
-	m.queryInput.Focus()
+	m.focus = dbFocusDetail
+	m.syncActiveState()
 
 	for _, r := range []rune{'q', 's', 'r', 'p'} {
 		m, _ = step(m, tea.KeyMsg{
@@ -566,7 +559,7 @@ func (s *dbDebugSuite) TestAlphanumericKeysInQuery(c *tc.C) {
 			Runes: []rune{r},
 		})
 	}
-	c.Check(m.queryInput.Value(), tc.Not(tc.Equals), "")
+	c.Check(m.detail.queryInput.Value(), tc.Not(tc.Equals), "")
 }
 
 func (s *dbDebugSuite) TestCtrlRRefreshDatabases(c *tc.C) {
@@ -576,8 +569,9 @@ func (s *dbDebugSuite) TestCtrlRRefreshDatabases(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.focus = dqlitePaneDatabases
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusDatabases
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyCtrlR})
 	c.Assert(cmd, tc.NotNil)
@@ -593,8 +587,9 @@ func (s *dbDebugSuite) TestCtrlRRefreshObjects(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.focus = dqlitePaneObjects
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusObjects
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyCtrlR})
 	c.Assert(cmd, tc.NotNil)
@@ -610,14 +605,18 @@ func (s *dbDebugSuite) TestCtrlRRefreshCluster(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.focus = dqlitePaneCluster
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusDatabases
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyCtrlR})
 	c.Assert(cmd, tc.NotNil)
 	msg := execCmd(cmd)
-	_, ok := msg.(loadClusterMsg)
-	c.Check(ok, tc.IsTrue)
+	switch msg.(type) {
+	case loadDatabasesMsg, loadClusterMsg:
+	default:
+		c.Fatalf("expected loadDatabasesMsg or loadClusterMsg, got %T", msg)
+	}
 }
 
 func (s *dbDebugSuite) TestCtrlRRefreshQueryWithSQL(c *tc.C) {
@@ -627,9 +626,10 @@ func (s *dbDebugSuite) TestCtrlRRefreshQueryWithSQL(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.focus = dqlitePaneQuery
-	m.queryInput.SetValue("SELECT 1")
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusDetail
+	m.syncActiveState()
+	m.detail.queryInput.SetValue("SELECT 1")
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyCtrlR})
 	c.Assert(cmd, tc.NotNil)
@@ -642,8 +642,9 @@ func (s *dbDebugSuite) TestCtrlRRefreshQueryEmptySQL(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.focus = dqlitePaneQuery
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusDetail
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyCtrlR})
 	c.Check(cmd, tc.IsNil)
@@ -653,7 +654,8 @@ func (s *dbDebugSuite) TestCtrlRRefreshEmptyDatabases(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.focus = dqlitePaneDatabases
+	m.focus = dbFocusDatabases
+	m.syncActiveState()
 
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyCtrlR})
 	c.Check(cmd, tc.IsNil)
@@ -666,8 +668,8 @@ func (s *dbDebugSuite) TestReloadObjectsUsesKind(c *tc.C) {
 	m := NewDqliteModel(mock)
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
-	m.kind = "view"
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.objList.kind = "view"
 
 	cmd := m.reloadObjects()
 	c.Assert(cmd, tc.NotNil)
@@ -751,10 +753,6 @@ func (s *dbDebugSuite) TestLoadClusterCmdCallsAPI(c *tc.C) {
 	c.Check(mock.clusterCalls, tc.Equals, 1)
 }
 
-// ---------------------------------------------------------------------------
-// View tests
-// ---------------------------------------------------------------------------
-
 func (s *dbDebugSuite) TestViewQuitting(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
@@ -783,13 +781,13 @@ func (s *dbDebugSuite) TestViewWithData(c *tc.C) {
 	m := NewDqliteModel(&recordedMockAPI{})
 	m.width = 120
 	m.height = 50
-	m.databases = []common.DqliteDatabase{{Name: "controller", Namespace: "controller", Type: "controller"}}
-	m.clusterNodes = []common.DqliteNode{{ID: "aa", Address: "10.0.0.1:12345", Role: "voter"}}
-	m.objects = []common.DqliteObject{{Name: "foo", Kind: "table"}}
-	m.ddl = "CREATE TABLE foo (id INTEGER)"
-	m.queryColumns = []string{"id"}
-	m.queryRows = [][]string{{"1"}}
-	m.queryCount = 1
+	m.dbList.databases = []common.DqliteDatabase{{Name: "controller", Namespace: "controller", Type: "controller"}}
+	m.cluster.nodes = []common.DqliteNode{{ID: "aa", Address: "10.0.0.1:12345", Role: "voter"}}
+	m.objList.objects = []common.DqliteObject{{Name: "foo", Kind: "table"}}
+	m.detail.ddl = "CREATE TABLE foo (id INTEGER)"
+	m.detail.queryColumns = []string{"id"}
+	m.detail.queryRows = [][]string{{"1"}}
+	m.detail.queryCount = 1
 
 	v := m.View()
 	c.Check(v, tc.Not(tc.Equals), "")
