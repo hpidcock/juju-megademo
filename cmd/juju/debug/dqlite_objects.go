@@ -25,8 +25,22 @@ type dqliteObjListModel struct {
 	ready    bool
 }
 
+var objKinds = [...]string{"table", "view", "trigger"}
+
 func newDqliteObjListModel() dqliteObjListModel {
 	return dqliteObjListModel{kind: "table"}
+}
+
+func (m *dqliteObjListModel) cycleKind(delta int) {
+	idx := 0
+	for i, k := range objKinds {
+		if k == m.kind {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta + len(objKinds)) % len(objKinds)
+	m.kind = objKinds[idx]
 }
 
 func (m dqliteObjListModel) Update(msg tea.Msg) (dqliteObjListModel, tea.Cmd) {
@@ -149,7 +163,7 @@ func (m dqliteObjListModel) View() string {
 
 	title := headerStyle.Render("Objects")
 	kindTag := fmt.Sprintf("[%s]", kindLabel(m.kind))
-	shortcuts := shortcutStyle.Render(fmt.Sprintf("%s  [^1/^2/^3] kind", kindTag))
+	shortcuts := shortcutStyle.Render(fmt.Sprintf("%s  [[/]] kind", kindTag))
 
 	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", shortcuts)
 

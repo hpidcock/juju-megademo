@@ -13,10 +13,9 @@ import (
 	"github.com/mattn/go-isatty"
 
 	jujucmd "github.com/juju/juju/cmd"
+	"github.com/juju/juju/api/common"
 	"github.com/juju/juju/cmd/cmd"
 	"github.com/juju/juju/cmd/modelcmd"
-
-	"github.com/juju/juju/api/common"
 )
 
 type dbDebugCommand struct {

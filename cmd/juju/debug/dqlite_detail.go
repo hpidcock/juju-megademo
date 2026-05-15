@@ -70,14 +70,16 @@ func (m dqliteDetailModel) Update(msg tea.Msg) (dqliteDetailModel, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.active {
-			switch msg.String() {
-			case "ctrl+enter":
-				break
-			default:
-				if m.queryInput.Focused() {
-					var cmd tea.Cmd
-					m.queryInput, cmd = m.queryInput.Update(msg)
-					cmds = append(cmds, cmd)
+			if msg.Type == tea.KeyF5 {
+				return m, nil
+			}
+			if m.queryInput.Focused() {
+				oldLines := m.queryLineCount()
+				var cmd tea.Cmd
+				m.queryInput, cmd = m.queryInput.Update(msg)
+				cmds = append(cmds, cmd)
+				if m.queryLineCount() != oldLines {
+					m.recomputeLayout()
 				}
 			}
 		}
@@ -85,15 +87,9 @@ func (m dqliteDetailModel) Update(msg tea.Msg) (dqliteDetailModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = m.Height()
-		ddlHeight := max(m.height/3-2, 1)
-		resultsHeight := max(m.height-m.height/3-5, 1)
-		m.ddlViewport = viewport.New(m.width-4, ddlHeight)
-		m.ddlViewport.SetContent(m.ddl)
-		m.resultsViewport = viewport.New(m.width-4, resultsHeight)
-		m.resultsViewport.SetContent(m.renderResults())
 		m.queryInput.SetWidth(m.width - 6)
-		m.queryInput.SetHeight(1)
 		m.ready = true
+		m.recomputeLayout()
 	}
 
 	if m.ready {
@@ -192,7 +188,7 @@ func (m dqliteDetailModel) View() string {
 		Foreground(lipgloss.Color("228"))
 
 	title := headerStyle.Render("DDL / Query")
-	shortcut := shortcutStyle.Render("[^ENTER] run")
+	shortcut := shortcutStyle.Render("[F5] run")
 	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", shortcut)
 
 	sepWidth := max(m.width-4, 10)
@@ -255,4 +251,30 @@ func (m dqliteDetailModel) View() string {
 		Height(m.Height() - 2)
 
 	return borderStyle.Render(b.String())
+}
+
+func (m *dqliteDetailModel) recomputeLayout() {
+	if !m.ready || m.height <= 4 {
+		return
+	}
+	queryH := min(m.queryLineCount(), max(m.height/3, 3))
+	m.queryInput.SetHeight(queryH)
+	separatorAndHeaderH := 4
+	ddlHeight := max((m.height-queryH-separatorAndHeaderH)*35/100, 1)
+	resultsHeight := max(m.height-ddlHeight-queryH-separatorAndHeaderH, 1)
+
+	ddlY := m.ddlViewport.YOffset
+	resY := m.resultsViewport.YOffset
+
+	m.ddlViewport = viewport.New(m.width-4, ddlHeight)
+	m.ddlViewport.SetContent(m.ddl)
+	m.ddlViewport.SetYOffset(ddlY)
+
+	m.resultsViewport = viewport.New(m.width-4, resultsHeight)
+	m.resultsViewport.SetContent(m.renderResults())
+	m.resultsViewport.SetYOffset(resY)
+}
+
+func (m dqliteDetailModel) queryLineCount() int {
+	return strings.Count(m.queryInput.Value(), "\n") + 1
 }

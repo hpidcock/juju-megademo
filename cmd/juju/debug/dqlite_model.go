@@ -237,14 +237,11 @@ func (m *dqliteModel) handleObjFocusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.objList, cmd = m.objList.Update(msg)
 		return m, cmd
-	case "ctrl+1":
-		m.objList.kind = "table"
+	case "]":
+		m.objList.cycleKind(1)
 		return m, m.reloadObjects()
-	case "ctrl+2":
-		m.objList.kind = "view"
-		return m, m.reloadObjects()
-	case "ctrl+3":
-		m.objList.kind = "trigger"
+	case "[":
+		m.objList.cycleKind(-1)
 		return m, m.reloadObjects()
 	case "enter":
 		if len(m.objList.objects) == 0 || len(m.dbList.databases) == 0 {
@@ -258,18 +255,16 @@ func (m *dqliteModel) handleObjFocusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *dqliteModel) handleDetailFocusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+enter":
+	if msg.Type == tea.KeyF5 {
 		if len(m.dbList.databases) == 0 {
 			return m, nil
 		}
 		db := m.dbList.databases[m.dbList.cursor]
 		return m, loadQueryCmd(m.api, db.Namespace, m.detail.queryInput.Value(), m.defaultLimit)
-	default:
-		var cmd tea.Cmd
-		m.detail, cmd = m.detail.Update(msg)
-		return m, cmd
 	}
+	var cmd tea.Cmd
+	m.detail, cmd = m.detail.Update(msg)
+	return m, cmd
 }
 
 func (m *dqliteModel) reloadActivePane() tea.Cmd {
@@ -444,8 +439,8 @@ func (m *dqliteModel) viewHelp() string {
 		{"Shift+Tab", "Previous pane"},
 		{"↑ / ↓", "Navigate list / scroll"},
 		{"Enter", "Select database / object"},
-		{"Ctrl+Enter", "Execute query"},
-		{"Ctrl+1..3", "Object kind (tables/views/triggers)"},
+		{"F5", "Execute query"},
+		{"[ / ]", "Cycle object kind (bracket keys)"},
 		{"Ctrl+R", "Refresh pane"},
 		{"Ctrl+H", "This help"},
 		{"Esc", "Dismiss"},

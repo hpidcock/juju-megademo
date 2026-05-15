@@ -612,11 +612,9 @@ func (s *dbDebugSuite) TestCtrlRRefreshCluster(c *tc.C) {
 	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyCtrlR})
 	c.Assert(cmd, tc.NotNil)
 	msg := execCmd(cmd)
-	switch msg.(type) {
-	case loadDatabasesMsg, loadClusterMsg:
-	default:
-		c.Fatalf("expected loadDatabasesMsg or loadClusterMsg, got %T", msg)
-	}
+	_, a := msg.(loadDatabasesMsg)
+	_, b := msg.(loadClusterMsg)
+	c.Check(a || b, tc.IsTrue)
 }
 
 func (s *dbDebugSuite) TestCtrlRRefreshQueryWithSQL(c *tc.C) {
@@ -792,4 +790,111 @@ func (s *dbDebugSuite) TestViewWithData(c *tc.C) {
 	v := m.View()
 	c.Check(v, tc.Not(tc.Equals), "")
 	c.Check(v, tc.Not(tc.Equals), "Loading...")
+}
+
+func (s *dbDebugSuite) TestBracketCyclesKind(c *tc.C) {
+	mock := &recordedMockAPI{
+		objects: []common.DqliteObject{{Name: "foo", Kind: "table"}},
+	}
+	m := NewDqliteModel(mock)
+	m.width = 120
+	m.height = 50
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusObjects
+	m.syncActiveState()
+
+	c.Check(m.objList.kind, tc.Equals, "table")
+
+	m, cmd := step(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	c.Check(m.objList.kind, tc.Equals, "view")
+	c.Assert(cmd, tc.NotNil)
+
+	m, _ = step(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	c.Check(m.objList.kind, tc.Equals, "trigger")
+
+	m, _ = step(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	c.Check(m.objList.kind, tc.Equals, "table")
+
+	m, _ = step(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	c.Check(m.objList.kind, tc.Equals, "trigger")
+
+	m, _ = step(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	c.Check(m.objList.kind, tc.Equals, "view")
+}
+
+func (s *dbDebugSuite) TestF5ExecutesQuery(c *tc.C) {
+	mock := &recordedMockAPI{
+		queryResult: &common.DqliteQueryResult{Columns: []string{"c1"}, RowCount: 1},
+	}
+	m := NewDqliteModel(mock)
+	m.width = 120
+	m.height = 50
+	m.dbList.databases = []common.DqliteDatabase{{Name: "mydb", Namespace: "ns1"}}
+	m.focus = dbFocusDetail
+	m.syncActiveState()
+	m.detail.queryInput.SetValue("SELECT 1")
+
+	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyF5})
+	c.Assert(cmd, tc.NotNil)
+	msg := execCmd(cmd)
+	_, ok := msg.(loadQueryMsg)
+	c.Check(ok, tc.IsTrue)
+	c.Check(len(mock.queryCalls), tc.Equals, 1)
+	c.Check(mock.queryCalls[0].sql, tc.Equals, "SELECT 1")
+}
+
+func (s *dbDebugSuite) TestF5NoDatabase(c *tc.C) {
+	m := NewDqliteModel(&recordedMockAPI{})
+	m.width = 120
+	m.height = 50
+	m.focus = dbFocusDetail
+	m.syncActiveState()
+
+	_, cmd := step(m, tea.KeyMsg{Type: tea.KeyF5})
+	c.Check(cmd, tc.IsNil)
+}
+
+func (s *dbDebugSuite) TestQueryTextareaExpands(c *tc.C) {
+	m := NewDqliteModel(&recordedMockAPI{})
+	m.width = 120
+	m.height = 50
+	m.focus = dbFocusDetail
+	m.syncActiveState()
+
+	m, _ = step(m, tea.WindowSizeMsg{Width: 120, Height: 50})
+	initialHeight := m.detail.queryInput.Height()
+
+	m.detail.queryInput.SetValue("SELECT *\nFROM foo\nWHERE id = 1")
+	m.detail.recomputeLayout()
+	c.Check(m.detail.queryInput.Height() > initialHeight, tc.IsTrue)
+}
+
+func (s *dbDebugSuite) TestQueryTextareaShrinks(c *tc.C) {
+	m := NewDqliteModel(&recordedMockAPI{})
+	m.width = 120
+	m.height = 50
+	m.focus = dbFocusDetail
+	m.syncActiveState()
+
+	m, _ = step(m, tea.WindowSizeMsg{Width: 120, Height: 50})
+	initialHeight := m.detail.queryInput.Height()
+
+	m.detail.queryInput.SetValue("line1\nline2\nline3\nline4")
+	m.detail.recomputeLayout()
+	expandedHeight := m.detail.queryInput.Height()
+	c.Check(expandedHeight > initialHeight, tc.IsTrue)
+
+	m.detail.queryInput.SetValue("SELECT 1")
+	m.detail.recomputeLayout()
+	c.Check(m.detail.queryInput.Height(), tc.Equals, initialHeight)
+}
+
+func (s *dbDebugSuite) TestRecomputeLayoutNotReady(c *tc.C) {
+	m := NewDqliteModel(&recordedMockAPI{})
+	m.width = 120
+	m.height = 50
+	m.detail.queryInput.SetValue("SELECT 1")
+	m.detail.recomputeLayout()
+
+	c.Check(m.detail.ready, tc.IsFalse)
 }
